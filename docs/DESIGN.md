@@ -69,13 +69,13 @@ web の Space は `preventDefault` でページスクロールを抑止する。
 const DT = 1.0 / 60.0                 // 固定物理ステップ（core が公開）
 last = now();  acc = 0.0
 loop {
-    t = now();  acc += min(t - last, 0.25);  last = t   // 実時間を蓄積（巨大スパイクは 0.25s でクランプ）
+    t = now();  acc += min(t - last, 0.10);  last = t   // 実時間を蓄積。1フレーム上限 0.10s=6tick（超過分は捨てる＝処理が遅れたら物理がスロー化し spiral of death を防止。無操作落下も最大~3行に制限）
     for ev in poll_input() {              // 非ブロッキング入力
         Space/Click => if phase == GameOver { game.restart() } else { game.flap() }
         R           => game.restart()      //   GameOver のショートカット（term）
         Q/Esc       => quit                //   term のみ
     }
-    while acc >= DT { game.tick(DT); acc -= DT }   // 固定ステップで物理更新（Playing 時のみ）
+    while acc >= DT { game.tick(); acc -= DT }     // 固定ステップで物理更新（tick は内部で DT を使う。Playing 時のみ）
     render(&game)                          // core の状態 → 文字グリッド / canvas 矩形
     // 描画頻度は自由（term ~30–60Hz / web は requestAnimationFrame）。物理は常に DT 刻み
 }
@@ -153,7 +153,7 @@ loop {
 
 ## 3. core クレート（flappy-core）— 依存ゼロ・純粋ロジック
 
-**最重要。両プラットフォームが共有する唯一の真実。** I/O・描画・sleep・乱数エントロピー取得を一切持たない。`tick(dt)` 駆動の決定論的な状態機械。
+**最重要。両プラットフォームが共有する唯一の真実。** I/O・描画・sleep・乱数エントロピー取得を一切持たない。`tick()` 駆動の決定論的な状態機械。
 
 ### 座標系
 - 論理グリッド `W×H`（デフォルト **64列 × 24行**）。両プラットフォームで共通＝「同じ画面」。
@@ -186,7 +186,7 @@ pub struct Game {
 ### API（core が公開する最小操作）
 - `Game::new(cfg, seed) -> Game`
 - `flap(&mut self)` — Ready なら Playing 化、Playing なら `bird_vy = flap_impulse`
-- `tick(&mut self, dt: f32)` — Playing 時のみ物理更新（後述）。呼び出し側は**固定ステップ `DT = 1/60` を渡す**（§1 の蓄積ループ。実 dt の揺れを物理に持ち込まない＝プラットフォーム非依存・決定論）。core は `pub const DT: f32 = 1.0 / 60.0;` を公開する
+- `tick(&mut self)` — Playing 時のみ物理更新（後述）。**内部で固定 `DT = 1/60` を進める**（可変 dt は受け取らない＝決定論を型で強制。実 dt の揺れは物理に入らずプラットフォーム非依存）。core は `pub const DT: f32 = 1.0 / 60.0;` を公開し、レンダラ側がアキュムレータで `tick()` の呼び出し回数を制御する（§1）
 - `restart(&mut self)` — best を保持して初期化
 - 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `pipes()`, `score`, `best`
 - 初期化（new / restart）: `bird_y` は画面中央付近。最初の棒を `x = cols`（右端）に1本だけ生成し、`dist_to_next = pipe_spacing` から開始（1本目が鳥に届くまで約 `cols - bird_col` 列 ≈ 1画面ぶんの助走になり、開始即死を防ぐ）
@@ -194,9 +194,9 @@ pub struct Game {
 ### tick の中身（処理順）
 セル化は描画と判定で**同じ丸めを使う**: `bird_row = bird_y.round() as i32`、固定列 `bird_c = bird_col as i32`、`pipe_col = p.x.round() as i32`。**棒は常に 1 列幅**（`pipe_width` は持たない）。境界は HUD=行0・地面ライン=行 `rows-1`（鳥が乗れる範囲 `1..=rows-2`）。棒 `█` の描画セルは衝突と**同一定義**: `1 ≤ row < gap_top` ∪ `gap_top + pipe_gap ≤ row ≤ rows-2`。描画と判定は同じ純粋関数を共有し、両者の乖離（「隙間を通ったのに死ぬ」系バグ）を防ぐ。
 
-1. `bird_vy = (bird_vy + gravity * dt).min(vy_max); bird_y += bird_vy * dt`（`vy_max` で終端速度を制限）
-2. 全 pipe の `x -= scroll_speed * dt`、画面外(`x < -1`)の pipe を除去
-3. `dist_to_next -= scroll_speed * dt`、0 以下になったら `gap_top` を rng で `[1, rows-1-pipe_gap]`（**両端含む / inclusive**）から選び新 pipe を右端（`x = cols`）に生成、`dist_to_next += pipe_spacing`（剰余を保持し spacing が drift しない）
+1. `bird_vy = (bird_vy + gravity * DT).min(vy_max); bird_y += bird_vy * DT`（`vy_max` で終端速度を制限）
+2. 全 pipe の `x -= scroll_speed * DT`、画面外(`x < -1`)の pipe を除去
+3. `dist_to_next -= scroll_speed * DT`、0 以下になったら `gap_top` を rng で `[1, rows-1-pipe_gap]`（**両端含む / inclusive**）から選び新 pipe を右端（`x = cols`）に生成、`dist_to_next += pipe_spacing`（剰余を保持し spacing が drift しない）
 4. **衝突判定（先に評価。当たれば加点せず `phase = GameOver`）**
    - 天井/地面: `bird_row < 1 || bird_row >= rows - 1`
    - 棒: `pipe_col == bird_c` の pipe があり、かつ `bird_row < gap_top || bird_row >= gap_top + pipe_gap`
@@ -207,7 +207,7 @@ pub struct Game {
 ### 乱数
 **決定論（同一 `(seed, 入力列, ステップ数)` → ビット一致。物理は固定 DT で進むので native/wasm・実機/headless が一致）が要件**のため、OS エントロピーを引く `getrandom`/`rand` は使わない（getrandom 0.4 は `wasm_js` feature だけで wasm 対応はするが、非決定なので要件に反する）。**自前 RNG（数行）** を `rng.rs` に置く。実装は **SplitMix64**（seed=0 でも縮退せず、`Date.now()` のような単調 seed でも初手から散る。素の xorshift は state=0 で 0 を吐き続けるため避ける）。seed は呼び出し側が渡す（term: システム時刻、web: `Date.now()`）。これで core は完全に依存ゼロ・全環境同一動作。
 
-**決定論ガードレール**: core は `f32` の四則演算と比較のみを使い、`mul_add`・`sqrt`・三角/指数関数を**使わない**（IEEE754 の基本演算は native/wasm でビット一致するが、transcendental と FMA 融合は保証されない）。物理は**常に固定 `DT = 1.0/60.0`** で進む（§1 の蓄積ループ）ため、実機・headless・テストが同一トレースになる。実 dt の揺れは描画頻度にのみ影響し、物理・判定には一切入らない。
+**決定論ガードレール**: core は `f32` の四則演算と比較のみを使い、`mul_add`・`sqrt`・三角/指数関数を**使わない**（IEEE754 の基本演算は native/wasm でビット一致するが、transcendental と FMA 融合は保証されない）。物理は**常に固定 `DT = 1.0/60.0`** で進む（§1 の蓄積ループ）ため、実機・headless・テストが同一トレースになる。実 dt の揺れは描画頻度にのみ影響し、物理・判定には一切入らない。入力は描画フレーム境界で反映され（1 描画内の複数 tick は同一入力状態を見る）、決定論の「入力列」はこの量子化済みの列を指す。
 
 ### テスト（= 検証可能ゴール）
 `crates/core/src/lib.rs` の `#[cfg(test)]` に:
@@ -228,10 +228,19 @@ pub struct Game {
 - 起動時: alternate screen 入場 + raw mode + カーソル非表示。crossterm 0.29 に raw mode の RAII は無いので**自前の `Drop` ガード**で復帰させ、加えて **panic hook**（まず端末復帰 → 既定 hook）を仕込んで panic 時の端末破壊を防ぐ。**`panic = "abort"` を設定しない**（Drop が走らなくなる）。
 - ゲームループ: 描画は ~30–60Hz、**物理は固定 60Hz**（§1 の蓄積ループ。1 描画あたり 1–2 tick）。`event::poll(timeout)` で非ブロッキング入力 →
   - **Space / クリック**: GameOver なら `restart()`、それ以外は `flap()` / **r**: `restart()`（GameOver のショートカット）/ **q・Esc**: 終了
-- 各フレーム: 経過実時間を蓄積し固定 `DT` 刻みで `tick(DT)` → グリッド（`Vec<char>` か `String`）を組み立て、カーソルを左上に戻して一括描画。
+- 各フレーム: 経過実時間を蓄積し固定 `DT` 刻みで `tick()` を呼ぶ → グリッド（`Vec<char>` か `String`）を組み立て、カーソルを左上に戻して一括描画。
   - 鳥 `●`、棒 `█`（緑）、地面ライン、上部にスコア/ベスト、Ready/GameOver のメッセージ。
 - グリッドはターミナル幅未満ならセンタリング（レターボックス）。64×24 未満ならプレイを止めてリサイズを促す（§2）。`Event::Resize` は次フレームで再センタリングのみ。
-- **headless モード** `flappy --headless --seed S --frames N`: TTY 不要・端末ガード非経由で、**決定論的な autopilot**（次の棒の隙間中心 `gap_top + pipe_gap/2` より鳥が下なら flap。隙間を追従するので確実に数本くぐる）＋**固定 DT** で N フレーム自動実行し最終スコアを stdout 出力。CI は **(a) 同一 seed の 2 回走でスコア一致**（決定論の回帰検出）と **(b) スコアが既知のゴールデン値（非ゼロ）** を assert する。
+- **headless モード** `flappy --headless --seed S --frames N`: TTY 不要・端末ガード非経由で、**決定論的な autopilot**（下記の一意規則で隙間を追従）＋**固定 DT** で N フレーム自動実行し最終スコアを stdout 出力。CI は **(a) 同一 seed の 2 回走でスコア一致**（決定論の回帰検出）と **(b) スコアが既知のゴールデン値（非ゼロ）** を assert する（ゴールデン値は実装後に実測して埋める）。autopilot 規則は実装非依存に一意化する:
+
+  ```
+  // 前方(x≥bird_col)の未passed の最寄り、無ければ未passed の最寄りを狙う
+  target = pipes.filter(|p| !p.passed && p.x >= bird_col).min_by(|p| p.x)
+           .or(pipes.filter(|p| !p.passed).min_by(|p| p.x))
+  if let Some(p) = target {
+      if bird_y > p.gap_top as f32 + pipe_gap as f32 / 2.0 { flap() }  // 隙間中心より下なら上昇
+  }
+  ```
 - bin 名は `flappy`（`cargo run -p flappy-term` / インストール後 `flappy`）。
 
 ---
@@ -240,7 +249,7 @@ pub struct Game {
 
 - 通常の **binary（`fn main()`）を wasm32 にビルド**（cdylib ではない）。依存: `wasm-bindgen`, `web-sys`（Window/Document/HtmlCanvasElement/CanvasRenderingContext2d/KeyboardEvent 等）, `flappy-core`。RAF/イベントの定型ボイラープレート削減に `gloo`（gloo-render, gloo-events）を併用。
 - `fn main()` をエントリに（trunk の no-modules 構成では `#[wasm_bindgen(start)]` 不要）: canvas 取得 → 入力リスナ登録（**Space/click/tap**。GameOver なら `restart()`、それ以外は `flap()`＝term と同一ルーティング。`keydown` のリピート `event.repeat` は無視）→ requestAnimationFrame ループ開始。Space の `preventDefault` は **passive でないリスナ**（gloo の `EventListenerOptions::enable_prevent_default()`）でないと無視されるので注意。
-- RAF ループ: 前フレームからの実時間を蓄積し**固定 `DT` 刻みで `tick`**（§1）。蓄積は 0.25s でクランプ＝タブ復帰・処理停止後の**巨大スパイクを吸収する安全装置**（外すと復帰時に大量 tick で即死）。可能なら `visibilitychange` で非表示中はループを止め、復帰時に蓄積をリセット。描画は core の状態を canvas に矩形で。1セル=固定 px（例 16px）、canvas = `64*16 × 24*16`、CSS で中央寄せ。**高 DPI** は `image-rendering: pixelated` ＋整数座標描画で滲み回避（`devicePixelRatio` スケールは任意）。色は term と揃える（恐竜風の淡背景＋濃色要素、棒は緑）。
+- RAF ループ: 前フレームからの実時間を蓄積し**固定 `DT` 刻みで `tick()`**（§1。1フレーム上限 0.10s）。RAF ハンドルは **drop で停止**するので構造体に保持するか `forget()` する（gloo-events のリスナ保持と同じ作法）。**`visibilitychange` で非表示中はループを止め、復帰時に `acc=0` にリセット（必須）**——長時間バックグラウンド後の復帰一発死を防ぐ（0.10s クランプは描画ヒッチ用の二次的な安全網）。描画は core の状態を canvas に矩形で。1セル=固定 px（例 16px）、canvas = `64*16 × 24*16`、CSS で中央寄せ。**高 DPI** は `image-rendering: pixelated` ＋整数座標描画で滲み回避（`devicePixelRatio` スケールは任意）。色は term と揃える（恐竜風の淡背景＋濃色要素、棒は緑）。
 - 描画ロジックは term と同じ「core グリッドをなぞって塗る」構造（言語も手順も共通）。
 
 ---
