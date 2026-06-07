@@ -234,11 +234,12 @@ pub struct Game {
 - **headless モード** `flappy --headless --seed S --frames N`: TTY 不要・端末ガード非経由で、**決定論的な autopilot**（下記の一意規則で隙間を追従）＋**固定 DT** で N フレーム自動実行し最終スコアを stdout 出力。CI は **(a) 同一 seed の 2 回走でスコア一致**（決定論の回帰検出）と **(b) スコアが既知のゴールデン値（非ゼロ）** を assert する（ゴールデン値は実装後に実測して埋める）。autopilot 規則は実装非依存に一意化する:
 
   ```
-  // 前方(x≥bird_col)の未passed の最寄り、無ければ未passed の最寄りを狙う
-  target = pipes.filter(|p| !p.passed && p.x >= bird_col).min_by(|p| p.x)
-           .or(pipes.filter(|p| !p.passed).min_by(|p| p.x))
+  // 前方(x≥bird_col)の未passed の最寄り、無ければ未passed の最寄りを狙う（x は f32 なので partial_cmp）
+  target = pipes.filter(|p| !p.passed && p.x >= bird_col).min_by(|a,b| a.x.partial_cmp(&b.x).unwrap())
+           .or(pipes.filter(|p| !p.passed).min_by(|a,b| a.x.partial_cmp(&b.x).unwrap()))
   if let Some(p) = target {
-      if bird_y > p.gap_top as f32 + pipe_gap as f32 / 2.0 { flap() }  // 隙間中心より下なら上昇
+      // bird_cell().1 = bird_y.round()（衝突と同じ丸め。bird_y は内部なので公開ゲッター経由）
+      if (bird_cell().1 as f32) > p.gap_top as f32 + pipe_gap as f32 / 2.0 { flap() }
   }
   ```
 - bin 名は `flappy`（`cargo run -p flappy-term` / インストール後 `flappy`）。
