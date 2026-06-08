@@ -41,10 +41,10 @@ flappy-cli/
 ```
                    SPACE                衝突（棒 / 天井 / 地面）
    start ─▶ ┌───────┐ ─────────▶ ┌─────────┐ ─────────────────▶ ┌──────────┐
-           │ Ready │            │ Playing │                    │ GameOver │
+            │ Ready │            │ Playing │                    │ GameOver │
             └───────┘            └─────────┘                    └──────────┘
-                ▲                                                    │
-                └──────────────── SPACE / r （restart）──────────────┘
+                ▲                                                   │
+                └─────────────── SPACE / r (restart) ───────────────┘
 
    q / Esc（term）・ウィンドウを閉じる（web） … いつでも終了
 ```
@@ -127,10 +127,10 @@ loop {
  SCORE 7                         BEST 12
                                           
          ╔════════════════════╗           
-         ║     GAME  OVER      ║           
-         ║     SCORE    7      ║           
-         ║  SPACE / r : retry  ║           
-    ✕    ║  q         : quit   ║           
+         ║     GAME  OVER     ║           
+         ║     SCORE    7     ║           
+         ║  SPACE / r : retry ║           
+    ✕    ║  q         : quit  ║           
          ╚════════════════════╝           
 ──────────────────────────────────────────
 ```
