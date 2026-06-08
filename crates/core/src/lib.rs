@@ -1,8 +1,8 @@
 //! flappy-core: 純粋なゲームロジック（I/O 依存ゼロ）。
 //!
 //! `tick()` 駆動の決定論的な状態機械。物理は常に固定 [`DT`] で進む。
-//! 物理パート（重力・スクロール・棒生成）まで実装済み。
-//! 衝突判定 / スコアは後続 issue で追加する。
+//! 物理パート（重力・スクロール・棒生成）と衝突判定まで実装済み。
+//! スコア加算 / restart は後続 issue で追加する。
 
 mod rng;
 
@@ -59,6 +59,18 @@ pub struct Pipe {
     pub passed: bool,
 }
 
+/// 棒が指定 `row`（行）を塞ぐか。**描画（棒セル）と衝突判定で共有する単一定義**。
+/// これにより「隙間を通ったのに死ぬ」描画/判定の乖離を防ぐ。
+///
+/// 棒セル（塞ぐ範囲）= `1 ≤ row < gap_top` ∪ `gap_top + pipe_gap ≤ row ≤ rows-2`。
+/// 隙間（通れる範囲）は `gap_top ≤ row < gap_top + pipe_gap`。
+pub fn pipe_blocks_row(gap_top: u16, pipe_gap: u16, rows: u16, row: i32) -> bool {
+    let top = gap_top as i32;
+    let gap_bottom = top + pipe_gap as i32; // 隙間直下の最初の行
+    let ground = rows as i32 - 2; // 鳥が乗れる最下行
+    (1 <= row && row < top) || (gap_bottom <= row && row <= ground)
+}
+
 pub struct Game {
     cfg: Config,
     rng: Rng,
@@ -113,6 +125,18 @@ impl Game {
         &self.pipes
     }
 
+    /// 鳥の離散行（`bird_y.round()`）。衝突判定と描画で同一の丸めを使うための単一ソース。
+    fn bird_row(&self) -> i32 {
+        self.bird_y.round() as i32
+    }
+
+    /// 鳥の描画セル `(col, row)`。衝突判定と同一の丸め。
+    pub fn bird_cell(&self) -> (u16, u16) {
+        let col = (self.cfg.bird_col as i32).max(0) as u16;
+        let row = self.bird_row().max(0) as u16;
+        (col, row)
+    }
+
     /// フラップ入力。Ready なら Playing 化、いずれにせよ Playing 中は上向き初速を与える。
     /// GameOver では何もしない（restart は別 API、#8）。
     pub fn flap(&mut self) {
@@ -124,8 +148,8 @@ impl Game {
         }
     }
 
-    /// 物理を固定 [`DT`] ぶん進める（Playing 時のみ）。重力→スクロール→棒生成まで。
-    /// 衝突判定・スコアは後続 issue で追加する。
+    /// 物理を固定 [`DT`] ぶん進める（Playing 時のみ）。
+    /// 重力→スクロール→棒生成→衝突判定。スコア加算は後続 issue で追加する。
     pub fn tick(&mut self) {
         if self.phase != Phase::Playing {
             return;
@@ -155,6 +179,22 @@ impl Game {
                 passed: false,
             });
             self.dist_to_next += self.cfg.pipe_spacing;
+        }
+
+        // 4. 衝突判定（先に評価。当たれば GameOver、加点しない＝スコアは #8）。
+        let bird_row = self.bird_row();
+        let bird_c = self.cfg.bird_col as i32;
+        let rows = self.cfg.rows;
+        let hit_bounds = bird_row < 1 || bird_row >= rows as i32 - 1;
+        // 鳥列に重なる棒があり、その行が隙間の外（= 棒セル）なら衝突。
+        // 境界（row<1 / row>rows-2）は上の hit_bounds で先に弾くため、ここは
+        // pipe_blocks_row の定義と一致する。
+        let hit_pipe = self.pipes.iter().any(|p| {
+            p.x.round() as i32 == bird_c
+                && pipe_blocks_row(p.gap_top, self.cfg.pipe_gap, rows, bird_row)
+        });
+        if hit_bounds || hit_pipe {
+            self.phase = Phase::GameOver;
         }
     }
 }
@@ -256,18 +296,110 @@ mod tests {
 
     #[test]
     fn same_seed_produces_identical_pipe_spawns() {
+        // #7 で tick に衝突が入ったため、フラップしないと鳥が早期に GameOver して
+        // 棒が増えない。両ゲームに同一の hover ポリシーを適用して生かしたまま
+        // 複数の棒を生成し、決定論（gap_top 列の完全一致）を検証する。
+        let center = Config::default().rows / 2;
         let mut a = Game::new(Config::default(), 777);
         let mut b = Game::new(Config::default(), 777);
-        a.flap();
-        b.flap();
-        // 棒が複数本生成されるだけ回す。
         for _ in 0..400 {
-            a.tick();
-            b.tick();
+            for g in [&mut a, &mut b] {
+                // row >= center で flap（初手で Ready→Playing 化し、以降は中央付近で hover）。
+                if g.bird_cell().1 >= center {
+                    g.flap();
+                }
+                g.tick();
+            }
         }
         let gaps_a: Vec<u16> = a.pipes().iter().map(|p| p.gap_top).collect();
         let gaps_b: Vec<u16> = b.pipes().iter().map(|p| p.gap_top).collect();
-        assert!(gaps_a.len() > 1, "expected multiple pipes spawned");
+        assert!(gaps_a.len() > 1, "expected multiple pipes alive");
         assert_eq!(gaps_a, gaps_b, "same seed must yield identical gap_top列");
+    }
+
+    #[test]
+    fn pipe_blocks_row_matches_design_definition() {
+        let (gap_top, pipe_gap, rows) = (10u16, 6u16, 24u16);
+        // 隙間 [10, 16) は通れる。
+        for row in 10..16 {
+            assert!(
+                !pipe_blocks_row(gap_top, pipe_gap, rows, row),
+                "row {row} should be open (gap)"
+            );
+        }
+        // 隙間より上 [1, 10) は塞ぐ。
+        for row in 1..10 {
+            assert!(pipe_blocks_row(gap_top, pipe_gap, rows, row), "row {row}");
+        }
+        // 隙間より下 [16, 22=rows-2] は塞ぐ。
+        for row in 16..=22 {
+            assert!(pipe_blocks_row(gap_top, pipe_gap, rows, row), "row {row}");
+        }
+        // 天井行 0・地面行 rows-1 は棒セルではない（境界判定に委ねる）。
+        assert!(!pipe_blocks_row(gap_top, pipe_gap, rows, 0));
+        assert!(!pipe_blocks_row(gap_top, pipe_gap, rows, 23));
+    }
+
+    #[test]
+    fn falling_into_ground_triggers_gameover() {
+        let mut g = Game::new(Config::default(), 1);
+        g.flap();
+        // フラップせず落下し続ければ地面に到達して GameOver。
+        for _ in 0..300 {
+            g.tick();
+            if g.phase() == Phase::GameOver {
+                break;
+            }
+        }
+        assert_eq!(g.phase(), Phase::GameOver);
+        let (_, row) = g.bird_cell();
+        assert!(
+            row >= Config::default().rows - 1,
+            "should die at/below ground line, row={row}"
+        );
+    }
+
+    #[test]
+    fn flapping_into_ceiling_triggers_gameover() {
+        let mut g = Game::new(Config::default(), 1);
+        // 毎 tick フラップし続ければ上昇して天井に到達。
+        for _ in 0..300 {
+            g.flap();
+            g.tick();
+            if g.phase() == Phase::GameOver {
+                break;
+            }
+        }
+        assert_eq!(g.phase(), Phase::GameOver);
+        let (_, row) = g.bird_cell();
+        assert!(row < 1, "should die at ceiling, row={row}");
+    }
+
+    #[test]
+    fn bird_hits_pipe_outside_gap_triggers_gameover() {
+        // 鳥を右端寄りに置き最初の棒がすぐ到達するようにし、隙間が鳥の行を
+        // 外す seed を探す（決定論・有限）。境界でない GameOver = 棒衝突。
+        let rows = Config::default().rows;
+        for seed in 0..200u64 {
+            let mut g = Game::new(
+                Config {
+                    bird_col: 60.0,
+                    ..Config::default()
+                },
+                seed,
+            );
+            g.flap();
+            for _ in 0..120 {
+                g.tick();
+                if g.phase() == Phase::GameOver {
+                    let (_, row) = g.bird_cell();
+                    if row >= 1 && row <= rows - 2 {
+                        return; // 境界でない GameOver = 棒衝突を再現できた
+                    }
+                    break; // この seed は境界衝突。次の seed へ。
+                }
+            }
+        }
+        panic!("no seed produced a pipe collision within bounds");
     }
 }
