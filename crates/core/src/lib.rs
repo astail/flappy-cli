@@ -1,8 +1,8 @@
 //! flappy-core: 純粋なゲームロジック（I/O 依存ゼロ）。
 //!
 //! `tick()` 駆動の決定論的な状態機械。物理は常に固定 [`DT`] で進む。
-//! 本 issue (#5) では型定義・[`Config`] デフォルト・[`Game::new`] と
-//! ゲッタ雛形までを用意する。物理 `tick` / 衝突 / スコアは後続 issue で追加する。
+//! 物理パート（重力・スクロール・棒生成）まで実装済み。
+//! 衝突判定 / スコアは後続 issue で追加する。
 
 mod rng;
 
@@ -59,9 +59,6 @@ pub struct Pipe {
     pub passed: bool,
 }
 
-// 物理 `tick` を持つ #6 以降でこれらのフィールドが読まれる。現状は初期化のみで
-// 未読のため、骨格段階の dead_code 警告を抑止する（後続 issue で解除予定）。
-#[allow(dead_code)]
 pub struct Game {
     cfg: Config,
     rng: Rng,
@@ -111,6 +108,55 @@ impl Game {
     pub fn phase(&self) -> Phase {
         self.phase
     }
+
+    pub fn pipes(&self) -> &[Pipe] {
+        &self.pipes
+    }
+
+    /// フラップ入力。Ready なら Playing 化、いずれにせよ Playing 中は上向き初速を与える。
+    /// GameOver では何もしない（restart は別 API、#8）。
+    pub fn flap(&mut self) {
+        if self.phase == Phase::Ready {
+            self.phase = Phase::Playing;
+        }
+        if self.phase == Phase::Playing {
+            self.bird_vy = self.cfg.flap_impulse;
+        }
+    }
+
+    /// 物理を固定 [`DT`] ぶん進める（Playing 時のみ）。重力→スクロール→棒生成まで。
+    /// 衝突判定・スコアは後続 issue で追加する。
+    pub fn tick(&mut self) {
+        if self.phase != Phase::Playing {
+            return;
+        }
+
+        // 1. 重力 + 終端速度クランプ → bird_y 更新。
+        self.bird_vy = (self.bird_vy + self.cfg.gravity * DT).min(self.cfg.vy_max);
+        self.bird_y += self.bird_vy * DT;
+
+        // 2. 全 pipe を左へスクロール、画面外（x < -1）を除去。
+        let dx = self.cfg.scroll_speed * DT;
+        for p in &mut self.pipes {
+            p.x -= dx;
+        }
+        self.pipes.retain(|p| p.x >= -1.0);
+
+        // 3. 次の棒までの距離を進め、0 以下なら右端に新 pipe を生成。
+        //    剰余を保持して spacing が drift しないよう `+=` する。
+        self.dist_to_next -= dx;
+        if self.dist_to_next <= 0.0 {
+            let gap_top = self
+                .rng
+                .gen_range_inclusive(1, self.cfg.rows - 1 - self.cfg.pipe_gap);
+            self.pipes.push(Pipe {
+                x: self.cfg.cols as f32,
+                gap_top,
+                passed: false,
+            });
+            self.dist_to_next += self.cfg.pipe_spacing;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -158,5 +204,70 @@ mod tests {
             ..Config::default()
         };
         let _ = Game::new(cfg, 0);
+    }
+
+    #[test]
+    fn flap_starts_game_and_sets_upward_velocity() {
+        let mut g = Game::new(Config::default(), 1);
+        g.flap();
+        assert_eq!(g.phase(), Phase::Playing);
+        assert!(
+            g.bird_vy < 0.0,
+            "flap should give upward (negative) velocity"
+        );
+    }
+
+    #[test]
+    fn tick_does_nothing_until_playing() {
+        let mut g = Game::new(Config::default(), 1);
+        let y0 = g.bird_y;
+        let x0 = g.pipes()[0].x;
+        g.tick(); // Ready のまま
+        assert_eq!(g.phase(), Phase::Ready);
+        assert_eq!(g.bird_y, y0);
+        assert_eq!(g.pipes()[0].x, x0);
+    }
+
+    #[test]
+    fn gravity_pulls_bird_down_over_time() {
+        let mut g = Game::new(Config::default(), 1);
+        g.flap();
+        let y_start = g.bird_y;
+        // 2 秒ぶん（120 tick）回すと、初速の上昇を打ち消して開始位置より下（y 増加）へ。
+        for _ in 0..120 {
+            g.tick();
+        }
+        assert!(
+            g.bird_y > y_start,
+            "gravity should pull the bird below start: {} !> {}",
+            g.bird_y,
+            y_start
+        );
+    }
+
+    #[test]
+    fn pipes_scroll_left() {
+        let mut g = Game::new(Config::default(), 1);
+        g.flap();
+        let x_before = g.pipes()[0].x;
+        g.tick();
+        assert!(g.pipes()[0].x < x_before);
+    }
+
+    #[test]
+    fn same_seed_produces_identical_pipe_spawns() {
+        let mut a = Game::new(Config::default(), 777);
+        let mut b = Game::new(Config::default(), 777);
+        a.flap();
+        b.flap();
+        // 棒が複数本生成されるだけ回す。
+        for _ in 0..400 {
+            a.tick();
+            b.tick();
+        }
+        let gaps_a: Vec<u16> = a.pipes().iter().map(|p| p.gap_top).collect();
+        let gaps_b: Vec<u16> = b.pipes().iter().map(|p| p.gap_top).collect();
+        assert!(gaps_a.len() > 1, "expected multiple pipes spawned");
+        assert_eq!(gaps_a, gaps_b, "same seed must yield identical gap_top列");
     }
 }
