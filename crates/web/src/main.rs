@@ -5,12 +5,15 @@
 //! ゲッタを判定と共有する（描画と判定の乖離を防ぐ）。
 //! 入力 (#17): Space/click/tap を core 操作へルーティング（GameOver なら `restart()`、
 //! 他は `flap()` ＝ term の `route` と同一）。Space はページスクロール抑止のため
-//! prevent_default する。固定 DT の物理更新・visibilitychange 対応は #18 で追加する。
+//! prevent_default する。
+//! ループ (#18): RAF で実時間を蓄積し固定 [`DT`] 刻みで `tick()`（1 フレーム上限
+//! 0.10s、term と共通の蓄積ループ＝描画頻度非依存で決定論）。`visibilitychange` で
+//! 復帰時にアキュムレータをリセットし、長時間バックグラウンド後の一発死を防ぐ。
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use flappy_core::{pipe_blocks_row, Config, Game, Phase};
+use flappy_core::{pipe_blocks_row, Config, Game, Phase, DT};
 use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -187,13 +190,45 @@ fn main() {
         .forget();
     }
 
+    // 蓄積ループの状態。RAF 描画と visibilitychange ハンドラで共有する。
+    // last_time: 前フレームの RAF タイムスタンプ（ms）。None は「次フレームを基準に
+    // やり直す」合図（初回・復帰直後）。acc: 未消化の実時間（秒）。
+    let acc = Rc::new(Cell::new(0.0f32));
+    let last_time = Rc::new(Cell::new(None::<f64>));
+
+    // visibilitychange: 非表示→復帰の一発死防止。背景タブでは RAF 自体が止まるため、
+    // 復帰時にアキュムレータと前回時刻をリセットして溜まった実時間を捨てる（DESIGN §5）。
+    {
+        let acc = acc.clone();
+        let last_time = last_time.clone();
+        EventListener::new(&document, "visibilitychange", move |_event| {
+            acc.set(0.0);
+            last_time.set(None);
+        })
+        .forget();
+    }
+
     // RAF ループ。同一の FnMut クロージャを毎フレーム再予約し続ける
     // （FnOnce を毎回 drop する方式の実行中 drop 問題を避ける正準パターン）。
-    // #17 は入力を core へ反映するのみ。物理（tick）は未配線なので flap しても鳥は
-    // 落下せず、Ready→Playing でメッセージが消える反応までを描画する（#18 で物理）。
+    // 前フレームからの実時間を蓄積し、固定 DT 刻みで tick（描画頻度非依存＝決定論）。
     let f: Rc<RefCell<Option<RafCallback>>> = Rc::new(RefCell::new(None));
     let g = f.clone();
-    *g.borrow_mut() = Some(Closure::wrap(Box::new(move |_time: f64| {
+    *g.borrow_mut() = Some(Closure::wrap(Box::new(move |time: f64| {
+        if let Some(last) = last_time.get() {
+            // 1 フレーム上限 0.10s（描画ヒッチ・復帰時の spiral of death を防ぐ安全網）。
+            let dt = ((time - last) / 1000.0) as f32;
+            acc.set(acc.get() + dt.min(0.10));
+        }
+        last_time.set(Some(time));
+
+        {
+            let mut game = game.borrow_mut();
+            while acc.get() >= DT {
+                game.tick();
+                acc.set(acc.get() - DT);
+            }
+        }
+
         draw(&ctx, &game.borrow());
         request_animation_frame(f.borrow().as_ref().unwrap());
     }) as Box<dyn FnMut(f64)>));
