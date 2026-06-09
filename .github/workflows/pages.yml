@@ -1,0 +1,60 @@
+name: Deploy to GitHub Pages
+
+# main push で flappy-web を trunk build し、GitHub Pages へ自動デプロイする（DESIGN §6/§10）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Pages デプロイ（GitHub Actions 方式）に必要な権限。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時実行は 1 本に絞る（古いデプロイは中断）。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain (+ wasm32 target)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      # Pages のサブパス（/flappy-cli/）に合わせて public-url を指定する。
+      - name: Trunk build (release)
+        run: trunk build --release --public-url /flappy-cli/
+        working-directory: crates/web
+
+      # `_` 始まりファイル対策（Jekyll 無効化）。
+      - name: Add .nojekyll
+        run: touch crates/web/dist/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: crates/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
