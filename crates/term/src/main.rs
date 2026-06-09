@@ -7,6 +7,7 @@
 //! ループを回す。端末サイズに応じてセンタリング（レターボックス）し、最小サイズ
 //! (64×24) 未満ではプレイを止めてリサイズを促す（[`layout`]）。
 
+mod headless;
 mod input;
 mod layout;
 mod scene;
@@ -86,7 +87,26 @@ fn seed_from_clock() -> u64 {
         .unwrap_or(0)
 }
 
+/// `args` から `flag` の次トークンを取り出す（`--seed 1` の `1`）。
+fn arg_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    let i = args.iter().position(|a| a == flag)?;
+    args.get(i + 1).map(String::as_str)
+}
+
 fn main() -> io::Result<()> {
+    // headless モード: TTY 不要・端末ガード非経由で N フレーム自動実行しスコアを stdout 出力。
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--headless") {
+        let seed = arg_value(&args, "--seed")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+        let frames = arg_value(&args, "--frames")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(600);
+        println!("{}", headless::run_headless(seed, frames));
+        return Ok(());
+    }
+
     // panic 時はまず端末を復帰してから既定 hook（バックトレース表示）を呼ぶ。
     // `panic = "abort"` は設定しないこと（unwinding / Drop が走らなくなる）。
     let default_hook = panic::take_hook();
