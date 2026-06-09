@@ -1,8 +1,7 @@
 //! flappy-core: 純粋なゲームロジック（I/O 依存ゼロ）。
 //!
 //! `tick()` 駆動の決定論的な状態機械。物理は常に固定 [`DT`] で進む。
-//! 物理パート（重力・スクロール・棒生成）と衝突判定まで実装済み。
-//! スコア加算 / restart は後続 issue で追加する。
+//! 物理パート（重力・スクロール・棒生成）・衝突判定・スコア加算・restart を実装済み。
 
 mod rng;
 
@@ -149,7 +148,7 @@ impl Game {
     }
 
     /// 物理を固定 [`DT`] ぶん進める（Playing 時のみ）。
-    /// 重力→スクロール→棒生成→衝突判定。スコア加算は後続 issue で追加する。
+    /// 重力→スクロール→棒生成→衝突判定→スコア加算。
     pub fn tick(&mut self) {
         if self.phase != Phase::Playing {
             return;
@@ -195,7 +194,44 @@ impl Game {
         });
         if hit_bounds || hit_pipe {
             self.phase = Phase::GameOver;
+            return;
         }
+
+        // 5. スコア（衝突しなかった場合のみ）。鳥を完全に通り抜けた（pipe_col < bird_c）
+        //    未 passed の棒を passed 化し加点。best も更新。
+        let mut gained = 0u32;
+        for p in &mut self.pipes {
+            if !p.passed && (p.x.round() as i32) < bird_c {
+                p.passed = true;
+                gained += 1;
+            }
+        }
+        if gained > 0 {
+            self.score += gained;
+            if self.score > self.best {
+                self.best = self.score;
+            }
+        }
+    }
+
+    /// best を保持してゲームを初期化する（rng は seed から決定論的に振り直し）。
+    pub fn restart(&mut self) {
+        let best = self.best;
+        // bird は画面中央付近、最初の棒を右端に 1 本だけ（new と同じ初期化）。
+        self.bird_y = self.cfg.rows as f32 / 2.0;
+        self.bird_vy = 0.0;
+        let gap_top = self
+            .rng
+            .gen_range_inclusive(1, self.cfg.rows - 1 - self.cfg.pipe_gap);
+        self.pipes = vec![Pipe {
+            x: self.cfg.cols as f32,
+            gap_top,
+            passed: false,
+        }];
+        self.dist_to_next = self.cfg.pipe_spacing;
+        self.phase = Phase::Ready;
+        self.score = 0;
+        self.best = best;
     }
 }
 
@@ -401,5 +437,90 @@ mod tests {
             }
         }
         panic!("no seed produced a pipe collision within bounds");
+    }
+
+    #[test]
+    fn passing_one_pipe_scores_exactly_one() {
+        // hover で生き延びて最初の棒を通過する seed を探し、最初の加点が
+        // ちょうど 1（棒 1 本ずつ）で best も 1 になることを検証する。
+        let center = Config::default().rows / 2;
+        for seed in 0..200u64 {
+            let mut g = Game::new(Config::default(), seed);
+            for _ in 0..1000 {
+                if g.bird_cell().1 >= center {
+                    g.flap();
+                }
+                g.tick();
+                if g.score > 0 {
+                    assert_eq!(g.score, 1, "first scoring event must be exactly 1");
+                    assert_eq!(g.best, 1, "best must track the first score");
+                    return;
+                }
+                if g.phase() == Phase::GameOver {
+                    break;
+                }
+            }
+        }
+        panic!("no seed let the bird pass a pipe");
+    }
+
+    #[test]
+    fn scripted_hover_accumulates_score_with_best_tracking() {
+        // スクリプト化した hover フラップ列で回し、複数の棒を通過してスコアが
+        // 積み上がること・score が単調非減少で best が追従することを検証する。
+        let center = Config::default().rows / 2;
+        for seed in 0..200u64 {
+            let mut g = Game::new(Config::default(), seed);
+            let mut prev = 0;
+            for _ in 0..3000 {
+                if g.bird_cell().1 >= center {
+                    g.flap();
+                }
+                g.tick();
+                assert!(g.score >= prev, "score must be monotonic non-decreasing");
+                assert_eq!(g.best, g.score, "best must track score while climbing");
+                prev = g.score;
+                if g.phase() == Phase::GameOver {
+                    break;
+                }
+            }
+            if g.score >= 2 {
+                return; // 複数棒通過でスコア加算を確認
+            }
+        }
+        panic!("no seed accumulated score >= 2 under hover");
+    }
+
+    #[test]
+    fn restart_keeps_best_and_resets_state() {
+        let cfg = Config::default();
+        let (cols, bird_col, center) = (cfg.cols, cfg.bird_col, cfg.rows / 2);
+        let spacing = cfg.pipe_spacing;
+        // スコアを稼げる seed を探し、restart 後の状態を検証する。
+        for seed in 0..200u64 {
+            let mut g = Game::new(Config::default(), seed);
+            for _ in 0..3000 {
+                if g.bird_cell().1 >= center {
+                    g.flap();
+                }
+                g.tick();
+                if g.phase() == Phase::GameOver {
+                    break;
+                }
+            }
+            if g.score >= 1 {
+                let best = g.best;
+                g.restart();
+                assert_eq!(g.phase(), Phase::Ready);
+                assert_eq!(g.score, 0);
+                assert_eq!(g.best, best, "best must be preserved across restart");
+                assert_eq!(g.pipes().len(), 1);
+                assert_eq!(g.pipes()[0].x, cols as f32);
+                assert_eq!(g.dist_to_next, spacing);
+                assert_eq!(g.bird_cell(), (bird_col as u16, center));
+                return;
+            }
+        }
+        panic!("no seed produced a score to test restart");
     }
 }
