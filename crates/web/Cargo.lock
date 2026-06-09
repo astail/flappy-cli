@@ -23,6 +23,7 @@ name = "flappy-web"
 version = "0.1.0"
 dependencies = [
  "flappy-core",
+ "gloo-events",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -49,6 +50,16 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "gloo-events"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27c26fb45f7c385ba980f5fa87ac677e363949e065a083722697ef1b2cc91e41"
+dependencies = [
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
