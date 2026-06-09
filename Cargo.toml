@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["crates/core", "crates/term"]
+# web は wasm 専用で host ビルド不可のため native workspace から除外し、
+# crates/web 側を独立 workspace にする（CI は専用 wasm ジョブで trunk build）。
+exclude = ["crates/web"]
