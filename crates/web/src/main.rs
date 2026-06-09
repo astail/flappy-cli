@@ -1,17 +1,20 @@
 //! flappy-web — web-sys で canvas 描画する薄いレンダラ（wasm32 / trunk）。
 //!
-//! 本 issue (#16) では core の状態を canvas に矩形で描画する。term の
-//! `scene_to_string` と同じ「core グリッドをなぞって塗る」構造で、占有述語
-//! [`pipe_blocks_row`] と鳥セルゲッタを判定と共有する（描画と判定の乖離を防ぐ）。
-//! 固定 DT の物理更新・入力・visibilitychange 対応は後続 issue (#17〜#18) で追加する。
+//! 描画 (#16): core の状態を canvas に矩形で描画する。term の `scene_to_string` と
+//! 同じ「core グリッドをなぞって塗る」構造で、占有述語 [`pipe_blocks_row`] と鳥セル
+//! ゲッタを判定と共有する（描画と判定の乖離を防ぐ）。
+//! 入力 (#17): Space/click/tap を core 操作へルーティング（GameOver なら `restart()`、
+//! 他は `flap()` ＝ term の `route` と同一）。Space はページスクロール抑止のため
+//! prevent_default する。固定 DT の物理更新・visibilitychange 対応は #18 で追加する。
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use flappy_core::{pipe_blocks_row, Config, Game, Phase};
+use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, KeyboardEvent};
 
 /// 1 セルのピクセル幅（§5: 1セル=固定 px）。
 const CELL: u32 = 16;
@@ -35,6 +38,16 @@ fn request_animation_frame(f: &RafCallback) {
     window()
         .request_animation_frame(f.as_ref().unchecked_ref())
         .expect("request_animation_frame failed");
+}
+
+/// 主操作（Space/click/tap）を core へ振り分ける（term の `input::route` と同一）。
+/// GameOver はリスタート、それ以外はフラップ（Ready は初回フラップで Playing 化）。
+fn apply_primary(game: &mut Game) {
+    if game.phase() == Phase::GameOver {
+        game.restart();
+    } else {
+        game.flap();
+    }
 }
 
 /// 1 フレームを canvas に矩形で描画する。term の `scene_to_string` と同じ順序・同じ
@@ -121,10 +134,15 @@ fn main() {
         .expect("#canvas is not a canvas");
 
     // canvas = 64*16 × 24*16（論理グリッドは core が一意の真実）。
-    let game = Game::new(Config::default(), 1);
-    let cfg = game.config();
-    canvas.set_width(cfg.cols as u32 * CELL);
-    canvas.set_height(cfg.rows as u32 * CELL);
+    // game は RAF 描画と入力ハンドラで共有するため Rc<RefCell> で包む（JS は単一
+    // スレッドなので両者の borrow は実行時に重ならない）。
+    let game = Rc::new(RefCell::new(Game::new(Config::default(), 1)));
+    {
+        let cfg = game.borrow();
+        let cfg = cfg.config();
+        canvas.set_width(cfg.cols as u32 * CELL);
+        canvas.set_height(cfg.rows as u32 * CELL);
+    }
 
     let ctx = canvas
         .get_context("2d")
@@ -133,13 +151,50 @@ fn main() {
         .dyn_into::<CanvasRenderingContext2d>()
         .expect("not a 2d context");
 
+    // 入力リスナ（#17）。Space/click/tap を主操作へルーティング。
+    // - keydown: Space のみ。リピート（押しっぱなし）は flap せず、ページスクロール
+    //   抑止のため prevent_default のみ行う。prevent_default を効かせるには passive
+    //   でないリスナが必要なので enable_prevent_default で登録する（DESIGN §5）。
+    // - click / touchstart: どこでも主操作。touchstart は prevent_default で
+    //   合成クリックの二重発火とスクロール/ズームを抑止する。
+    let prevent = EventListenerOptions::enable_prevent_default();
+    {
+        let game = game.clone();
+        EventListener::new_with_options(&window(), "keydown", prevent, move |event| {
+            let ev = event.dyn_ref::<KeyboardEvent>().unwrap();
+            if ev.key() == " " {
+                ev.prevent_default();
+                if !ev.repeat() {
+                    apply_primary(&mut game.borrow_mut());
+                }
+            }
+        })
+        .forget();
+    }
+    {
+        let game = game.clone();
+        EventListener::new(&window(), "click", move |_event| {
+            apply_primary(&mut game.borrow_mut());
+        })
+        .forget();
+    }
+    {
+        let game = game.clone();
+        EventListener::new_with_options(&window(), "touchstart", prevent, move |event| {
+            event.prevent_default();
+            apply_primary(&mut game.borrow_mut());
+        })
+        .forget();
+    }
+
     // RAF ループ。同一の FnMut クロージャを毎フレーム再予約し続ける
     // （FnOnce を毎回 drop する方式の実行中 drop 問題を避ける正準パターン）。
-    // #16 は描画のみ。入力・物理（tick）は未配線なので game は Ready のまま。
+    // #17 は入力を core へ反映するのみ。物理（tick）は未配線なので flap しても鳥は
+    // 落下せず、Ready→Playing でメッセージが消える反応までを描画する（#18 で物理）。
     let f: Rc<RefCell<Option<RafCallback>>> = Rc::new(RefCell::new(None));
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::wrap(Box::new(move |_time: f64| {
-        draw(&ctx, &game);
+        draw(&ctx, &game.borrow());
         request_animation_frame(f.borrow().as_ref().unwrap());
     }) as Box<dyn FnMut(f64)>));
     request_animation_frame(g.borrow().as_ref().unwrap());
