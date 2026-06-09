@@ -1,17 +1,18 @@
 //! flappy-term（bin 名 `flappy`）— crossterm でターミナル描画する薄いレンダラ。
 //!
 //! 端末ライフサイクル（alternate screen / raw mode / カーソル非表示 / mouse capture）を
-//! RAII ガードと panic hook で安全に管理する。本 issue (#10) では core 状態を文字グリッドへ
-//! 変換する純粋関数 [`scene::scene_to_string`] と、それを左上から一括描画する処理を追加し、
-//! Ready 画面を表示する。入力ルーティング・固定 DT ループは後続 issue で追加する。
+//! RAII ガードと panic hook で安全に管理する。core 状態を文字グリッドへ変換する純粋関数
+//! [`scene::scene_to_string`] を左上から一括描画し、[`input`] で Space/クリック/r/q/Esc を
+//! core 操作へルーティングする。固定 DT の物理 tick ループは後続 issue (#12) で追加する。
 
+mod input;
 mod scene;
 
 use std::io::{self, Write};
 use std::panic;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
@@ -83,23 +84,27 @@ fn main() -> io::Result<()> {
 
     let _guard = TerminalGuard::enter()?;
 
-    // ゲーム状態（本 issue では tick せず Ready 画面を表示する。ループ駆動は後続 issue）。
-    let game = Game::new(Config::default(), seed_from_clock());
+    // ゲーム状態。本 issue では入力ルーティングで状態を更新し再描画する。
+    // 固定 DT の物理 tick ループは後続 issue（#12）で追加する。
+    let mut game = Game::new(Config::default(), seed_from_clock());
 
     let mut out = io::stdout();
     execute!(out, Clear(ClearType::All))?;
     draw_scene(&mut out, &game)?;
 
-    // q / Esc で抜ける。Resize 時は再描画（センタリング等は後続 issue）。
+    // 入力ルーティング: Space/クリック → GameOver なら restart 他は flap、r → restart、q/Esc → 終了。
     loop {
         if event::poll(Duration::from_millis(100))? {
-            match event::read()? {
-                Event::Key(key) => match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    _ => {}
-                },
-                Event::Resize(_, _) => draw_scene(&mut out, &game)?,
-                _ => {}
+            let ev = event::read()?;
+            if let Some(input) = input::classify(&ev) {
+                match input::route(input, game.phase()) {
+                    input::Action::Flap => game.flap(),
+                    input::Action::Restart => game.restart(),
+                    input::Action::Quit => break,
+                }
+                draw_scene(&mut out, &game)?;
+            } else if let Event::Resize(_, _) = ev {
+                draw_scene(&mut out, &game)?;
             }
         }
     }
