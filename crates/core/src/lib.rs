@@ -124,6 +124,11 @@ impl Game {
         &self.pipes
     }
 
+    /// 描画に必要なグリッド寸法・パラメータ（cols/rows/pipe_gap 等）を参照する。
+    pub fn config(&self) -> &Config {
+        &self.cfg
+    }
+
     /// 鳥の離散行（`bird_y.round()`）。衝突判定と描画で同一の丸めを使うための単一ソース。
     fn bird_row(&self) -> i32 {
         self.bird_y.round() as i32
