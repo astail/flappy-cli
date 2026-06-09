@@ -2,24 +2,30 @@
 //!
 //! 端末ライフサイクル（alternate screen / raw mode / カーソル非表示 / mouse capture）を
 //! RAII ガードと panic hook で安全に管理する。core 状態を文字グリッドへ変換する純粋関数
-//! [`scene::scene_to_string`] を左上から一括描画し、[`input`] で Space/クリック/r/q/Esc を
-//! core 操作へルーティングする。固定 DT の物理 tick ループは後続 issue (#12) で追加する。
+//! [`scene::scene_to_string`] を一括描画し、[`input`] で Space/クリック/r/q/Esc を core
+//! 操作へルーティングし、実時間を蓄積して固定 [`flappy_core::DT`] 刻みで物理を進める
+//! ループを回す。端末サイズに応じてセンタリング（レターボックス）し、最小サイズ
+//! (64×24) 未満ではプレイを止めてリサイズを促す（[`layout`]）。
 
 mod input;
+mod layout;
 mod scene;
 
 use std::io::{self, Write};
 use std::panic;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture};
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, size, Clear, ClearType, EnterAlternateScreen,
+    LeaveAlternateScreen,
 };
 use crossterm::{cursor, execute, queue};
 
-use flappy_core::{Config, Game};
+use flappy_core::{Config, Game, DT};
+
+use layout::Layout;
 
 /// 端末を元の状態へ戻す（best-effort、エラーは無視）。Drop と panic hook で共有する。
 fn restore_terminal() {
@@ -48,12 +54,11 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// 1 フレームを左上から一括描画する。棒（`█`）のみ緑、それ以外は端末既定色。
-fn draw_scene(out: &mut impl Write, game: &Game) -> io::Result<()> {
+/// 1 フレームを `(ox, oy)` を左上として一括描画する。棒（`█`）のみ緑、他は端末既定色。
+fn draw_scene(out: &mut impl Write, game: &Game, ox: u16, oy: u16) -> io::Result<()> {
     let scene = scene::scene_to_string(game);
-    queue!(out, cursor::MoveTo(0, 0))?;
     for (y, line) in scene.lines().enumerate() {
-        queue!(out, cursor::MoveTo(0, y as u16))?;
+        queue!(out, cursor::MoveTo(ox, oy + y as u16))?;
         for ch in line.chars() {
             if ch == '█' {
                 queue!(out, SetForegroundColor(Color::Green), Print(ch), ResetColor)?;
@@ -61,8 +66,16 @@ fn draw_scene(out: &mut impl Write, game: &Game) -> io::Result<()> {
                 queue!(out, Print(ch))?;
             }
         }
-        queue!(out, Clear(ClearType::UntilNewLine))?;
     }
+    out.flush()
+}
+
+/// 端末が最小サイズ未満のときのポーズ表示（中央にメッセージ）。
+fn draw_pause(out: &mut impl Write, term: (u16, u16)) -> io::Result<()> {
+    let (tw, th) = term;
+    let msg = "端末を 64x24 以上にしてください";
+    let x = (tw as usize).saturating_sub(msg.chars().count()) / 2;
+    queue!(out, cursor::MoveTo(x as u16, th / 2), Print(msg))?;
     out.flush()
 }
 
@@ -84,29 +97,59 @@ fn main() -> io::Result<()> {
 
     let _guard = TerminalGuard::enter()?;
 
-    // ゲーム状態。本 issue では入力ルーティングで状態を更新し再描画する。
-    // 固定 DT の物理 tick ループは後続 issue（#12）で追加する。
     let mut game = Game::new(Config::default(), seed_from_clock());
+    let grid = (Config::default().cols, Config::default().rows);
 
     let mut out = io::stdout();
     execute!(out, Clear(ClearType::All))?;
-    draw_scene(&mut out, &game)?;
 
-    // 入力ルーティング: Space/クリック → GameOver なら restart 他は flap、r → restart、q/Esc → 終了。
-    loop {
-        if event::poll(Duration::from_millis(100))? {
+    // 実時間を蓄積し固定 DT 刻みで物理を進める（描画頻度に依存しない＝決定論）。
+    let mut last_size = size()?;
+    let mut last = Instant::now();
+    let mut acc = 0.0f32;
+
+    'game: loop {
+        // 入力を非ブロッキングで全て取り出して適用。
+        while event::poll(Duration::ZERO)? {
             let ev = event::read()?;
             if let Some(input) = input::classify(&ev) {
                 match input::route(input, game.phase()) {
                     input::Action::Flap => game.flap(),
                     input::Action::Restart => game.restart(),
-                    input::Action::Quit => break,
+                    input::Action::Quit => break 'game,
                 }
-                draw_scene(&mut out, &game)?;
-            } else if let Event::Resize(_, _) = ev {
-                draw_scene(&mut out, &game)?;
             }
         }
+
+        // サイズ変化時は全消去して再センタリング（ゲーム状態は不変）。
+        let term = size()?;
+        if term != last_size {
+            execute!(out, Clear(ClearType::All))?;
+            last_size = term;
+        }
+
+        match layout::compute_layout(term, grid) {
+            Layout::TooSmall => {
+                // ポーズ: 物理を進めず、蓄積時間もリセット（復帰時に飛ばさない）。
+                draw_pause(&mut out, term)?;
+                last = Instant::now();
+                acc = 0.0;
+            }
+            Layout::Fit { ox, oy } => {
+                let now = Instant::now();
+                // 1 フレーム上限 0.10s（=6 tick）で spiral of death を防ぐ。
+                acc += (now - last).as_secs_f32().min(0.10);
+                last = now;
+                while acc >= DT {
+                    game.tick();
+                    acc -= DT;
+                }
+                draw_scene(&mut out, &game, ox, oy)?;
+            }
+        }
+
+        // 描画ペース ~60Hz（物理は固定 DT なのでこの値に依存しない）。
+        std::thread::sleep(Duration::from_millis(16));
     }
 
     Ok(())
