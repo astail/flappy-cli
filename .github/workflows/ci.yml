@@ -23,3 +23,32 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  # web は wasm 専用（root workspace から exclude）。専用ジョブで品質ゲート + trunk build。
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain (+ wasm32 target)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+          target: wasm32-unknown-unknown
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      - name: Format check (web)
+        run: cargo fmt --all --check
+        working-directory: crates/web
+
+      - name: Clippy (web)
+        run: cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
+        working-directory: crates/web
+
+      - name: Trunk build (web)
+        run: trunk build
+        working-directory: crates/web

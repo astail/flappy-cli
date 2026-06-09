@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FLAPPY</title>
+    <link data-trunk rel="rust" href="Cargo.toml" />
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #e8f4f8; /* 恐竜ゲーム風の淡背景 */
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #canvas {
+        image-rendering: pixelated; /* 整数座標描画で滲み回避 */
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+  </body>
+</html>
