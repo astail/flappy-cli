@@ -89,7 +89,10 @@ pub fn render(game: &Game) -> Frame {
     let (dot_w, dot_h) = (cols * 2, rows * 4);
     let mut dots = vec![vec![false; dot_w]; dot_h];
 
-    // 棒: dot-x = round(x*2) から幅 2 ドット。塞ぐセル行の dot-y 4 本を立てる。
+    // 棒: dot-x = round(x*2) から幅 2 ドット（=1 セル幅）。塞ぐセル行の dot-y 4 本を立てる。
+    // 横は dot 解像度（既知の制約: 衝突は round(p.x) の 1 セルで判定されるため視覚との差は
+    // 最大 1/4 セル。描画セルは衝突セル round(p.x) を常に含むので「触れて見えないのに死ぬ」
+    // ことはなく、ずれは「触れて見えても生きている」側にだけ倒れる）。
     for p in game.pipes() {
         let dx0 = (p.x * 2.0).round() as i32;
         for dx in [dx0, dx0 + 1] {
@@ -107,15 +110,20 @@ pub fn render(game: &Game) -> Frame {
     }
 
     // 鳥: dot-x = bird_col*2 から幅 2 ドット、dot-y 中心から縦 2 ドットのブロブ。
-    let bird_dx0 = (cfg.bird_col * 2.0).round() as i32;
-    let bird_dy_center = (game.bird_y() * 4.0).round() as i32;
-    for dx in [bird_dx0, bird_dx0 + 1] {
-        if dx < 0 || dx as usize >= dot_w {
-            continue;
-        }
-        for dy in [bird_dy_center, bird_dy_center + 1] {
-            if dy >= 0 && (dy as usize) < dot_h {
-                dots[dy as usize][dx as usize] = true;
+    // 縦は dot 解像度（既知の制約: 衝突は bird_cell() の round 行で判定されるため、視覚位置と
+    // 衝突行は最大 0.5 セルずれうる。視覚は真の f32 位置に忠実）。
+    // GameOver は ✕ を文字で出すためブロブは描かない（overlay_text 参照）。
+    if game.phase() != Phase::GameOver {
+        let bird_dx0 = (cfg.bird_col * 2.0).round() as i32;
+        let bird_dy_center = (game.bird_y() * 4.0).round() as i32;
+        for dx in [bird_dx0, bird_dx0 + 1] {
+            if dx < 0 || dx as usize >= dot_w {
+                continue;
+            }
+            for dy in [bird_dy_center, bird_dy_center + 1] {
+                if dy >= 0 && (dy as usize) < dot_h {
+                    dots[dy as usize][dx as usize] = true;
+                }
             }
         }
     }
@@ -148,8 +156,11 @@ pub fn render(game: &Game) -> Frame {
 }
 
 /// 立っているセルの塗り分けを決める。鳥セル（鳥列かつ鳥の縦 2 ドット帯に重なる行）は Bird、
-/// それ以外は Pipe。
+/// それ以外は Pipe。GameOver はブロブを描かないため常に Pipe。
 fn paint_for_cell(game: &Game, r: usize, c: usize) -> Paint {
+    if game.phase() == Phase::GameOver {
+        return Paint::Pipe;
+    }
     let cfg = game.config();
     let bird_c = cfg.bird_col.round() as i32;
     let bird_dy_center = (game.bird_y() * 4.0).round() as i32;
@@ -202,10 +213,12 @@ fn overlay_text(
         }
         Phase::GameOver => {
             draw_gameover_box(chars, paint, cols, game.score);
-            // 死亡した鳥のセルに ✕ を文字上書き（paint は Bird のまま）。
+            // 死亡した鳥は ✕ の文字で表す（render はブロブを描かない）。棒セルの上で
+            // 死んだ場合も ✕ が棒色にならないよう paint を Bird にする。
             let (bc, br) = game.bird_cell();
             if (br as usize) < rows as usize && bc < cols {
                 chars[br as usize][bc as usize] = BIRD_DEAD;
+                paint[br as usize][bc as usize] = Paint::Bird;
             }
         }
         Phase::Playing => {}
@@ -402,9 +415,10 @@ mod tests {
     #[test]
     fn bird_subcell_glyph_changes_as_bird_drifts() {
         // bird_y の端数（縦ドット位置）が変わると同じ行内でも Braille グリフが変わる
-        // ＝サブセル化の本質。重力で落ちる間、鳥がまだ row 12 に居るうちのグリフを集める。
+        // ＝サブセル化の本質。flap の上昇〜重力で戻る間、鳥が row 12 帯に居るうちの
+        // グリフを集める。
         let mut g = Game::new(Config::default(), 1);
-        g.flap(); // bird_y = 12.0 から重力で落下開始。
+        g.flap(); // 上向き初速で上昇開始（その後重力で減速し row 12 帯へ戻る）。
         let mut glyphs = std::collections::HashSet::new();
         // 初期状態（bird_y=12.0）。
         glyphs.insert(render(&g).chars[12][12]);
@@ -424,5 +438,21 @@ mod tests {
             glyphs.len() >= 2,
             "sub-cell drift within a row should yield >= 2 distinct glyphs, got {glyphs:?}"
         );
+    }
+
+    #[test]
+    fn pipe_visual_cells_always_cover_collision_cell() {
+        // 棒の描画 dot（round(2x) と +1）が属するセル集合は衝突セル round(x) を常に含む
+        // ＝「見た目で触れていないのに死ぬ」ことはない（横サブセル化の安全性の根拠）。
+        for i in 0..=400 {
+            let x = i as f32 * 0.05; // 0.00..20.00 を 1/20 セル刻みで走査。
+            let dx0 = (x * 2.0).round() as i32;
+            let cells = [dx0.div_euclid(2), (dx0 + 1).div_euclid(2)];
+            assert!(
+                cells.contains(&(x.round() as i32)),
+                "x={x}: visual cells {cells:?} must cover collision cell {}",
+                x.round() as i32
+            );
+        }
     }
 }
