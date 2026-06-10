@@ -103,6 +103,8 @@ cd crates/web && trunk build --release --public-url /flappy-cli/
 
 ブラウザ版は `main` への push をトリガに GitHub Actions（`.github/workflows/pages.yml`）が `trunk build` し、GitHub Pages へ自動デプロイされる。公開先は <https://astail.github.io/flappy-cli/>。
 
+ターミナル版のバージョンを上げて GitHub Releases / Homebrew tap を更新する手順は [`docs/RELEASE.md`](docs/RELEASE.md) を参照。
+
 ## 設計ドキュメント
 
 アーキテクチャ / フロー / 画面レイアウト / core API / パラメータ / 検証の詳細は [`docs/DESIGN.md`](docs/DESIGN.md) を参照。
