@@ -121,8 +121,7 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
             let _ = ctx.fill_text("GAME  OVER", w / 2.0, 3.5 * cell);
             ctx.set_font("16px monospace");
             let _ = ctx.fill_text(&format!("SCORE {}", game.score), w / 2.0, 5.5 * cell);
-            let _ = ctx.fill_text("SPACE / r : retry", w / 2.0, 7.0 * cell);
-            let _ = ctx.fill_text("q : quit", w / 2.0, 8.0 * cell);
+            let _ = ctx.fill_text("SPACE / click / r : retry", w / 2.0, 7.0 * cell);
         }
         Phase::Playing => {}
     }
@@ -169,6 +168,11 @@ fn main() {
                 ev.prevent_default();
                 if !ev.repeat() {
                     apply_primary(&mut game.borrow_mut());
+                }
+            } else if ev.key() == "r" || ev.key() == "R" {
+                // term の Input::Restart と同じく phase 非依存で restart。
+                if !ev.repeat() {
+                    game.borrow_mut().restart();
                 }
             }
         })
