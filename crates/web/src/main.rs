@@ -13,7 +13,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use flappy_core::{pipe_blocks_row, Config, Game, Phase, DT};
+use flappy_core::{pipe_blocks_row, Config, Game, Phase, DT, VERSION};
 use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -107,6 +107,14 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     let _ = ctx.fill_text(&format!("SCORE {}", game.score), cell, hud_y);
     ctx.set_text_align("right");
     let _ = ctx.fill_text(&format!("BEST {}", game.best), w - cell, hud_y);
+
+    // version（地面ライン右端に控えめに）。term の scene と同じ右下配置・単一ソース。
+    ctx.set_font("12px monospace");
+    let _ = ctx.fill_text(
+        &format!("v{VERSION}"),
+        w - cell * 0.5,
+        (rows as f64 - 0.5) * cell,
+    );
 
     // メッセージのオーバーレイ（term の行配置に合わせる）。
     ctx.set_text_align("center");
