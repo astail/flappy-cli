@@ -6,11 +6,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Pages デプロイ（GitHub Actions 方式）に必要な権限。
+# ワークフロー既定は最小権限。build は read のみで足りる。
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # 同時実行は 1 本に絞る（古いデプロイは中断）。
 concurrency:
@@ -51,6 +49,10 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # Pages デプロイ（GitHub Actions 方式）に必要な権限はこのジョブだけに付与する。
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
