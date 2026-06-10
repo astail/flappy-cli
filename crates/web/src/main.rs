@@ -79,8 +79,9 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
         }
     }
 
-    // 地面ライン（最下行の横帯）。
+    // 天井ライン（最上行の横帯）と地面ライン（最下行の横帯）。
     ctx.set_fill_style_str(COLOR_GROUND);
+    ctx.fill_rect(0.0, 0.0, w, cell);
     ctx.fill_rect(0.0, (rows as f64 - 1.0) * cell, w, cell);
 
     // 鳥（塗り円。衝突と同じ丸めのセル）。GameOver は赤。
