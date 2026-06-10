@@ -65,6 +65,8 @@
 
 **スタック**: Rust + WASM。ゲームロジックは I/O を持たない純粋な `flappy-core` に集約し、ターミナル/ブラウザは薄いレンダラ（ロジックを 1 言語で完全共有）。
 
+**term / web は同じ作りに揃える**: 見た目（レイアウト・要素の有無）も挙動も term と web で一致させる。core ロジックは両者で共有し差を出さない。片方の描画に手を入れたら、もう片方も必ず同じになるよう揃えること。
+
 **クレート構成**:
 - `crates/core`（flappy-core）— 純粋ロジック。依存ゼロ、`tick(dt)` 駆動の決定論的 state machine（Ready / Playing / GameOver）
 - `crates/term`（flappy-term, bin 名 `flappy`）— crossterm でターミナル描画

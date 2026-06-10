@@ -32,6 +32,11 @@ pub fn scene_to_string(game: &Game) -> String {
     let (cols, rows) = (cfg.cols, cfg.rows);
     let mut grid = vec![vec![' '; cols as usize]; rows as usize];
 
+    // 天井ライン（最上行）: web と同じく row 0 全幅に横帯を引き、その上に HUD を重ねる。
+    for cell in grid[0].iter_mut() {
+        *cell = GROUND;
+    }
+
     // HUD（最上行）: 左に SCORE、右に BEST。
     let score_text = format!("SCORE {}", game.score);
     place_at(&mut grid[0], &score_text, 1);
@@ -164,6 +169,11 @@ mod tests {
         assert_eq!(ls.len(), 24);
         assert!(ls[0].contains("SCORE 0"));
         assert!(ls[0].contains("BEST 0"));
+        // 天井ライン: HUD の左右の隙間は ─ で埋まる（web と見た目を揃える）。
+        assert!(
+            ls[0].contains('─'),
+            "ceiling line should render as ─ on row 0"
+        );
         // 鳥は (col 12, row 12)。
         assert_eq!(ls[12].chars().nth(12), Some('●'));
         // 地面ラインは ─ 基調で、右端に version を重ねる。
