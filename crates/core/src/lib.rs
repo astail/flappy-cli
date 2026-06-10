@@ -90,6 +90,12 @@ impl Game {
             cfg.scroll_speed * DT < 1.0 && cfg.vy_max * DT < 1.0,
             "config violates per-frame 1-cell invariant"
         );
+        // gap_top の抽選範囲 [1, rows - 1 - pipe_gap] が空にならないことを保証する。
+        // これが破れると rows - 1 - pipe_gap がアンダーフローし、棒が画面外に配置される。
+        assert!(
+            cfg.pipe_gap + 2 <= cfg.rows,
+            "config violates pipe_gap + 2 <= rows (gap_top range would be empty)"
+        );
 
         let mut rng = Rng::new(seed);
         // 鳥は画面中央付近から開始。
@@ -283,6 +289,19 @@ mod tests {
     fn new_panics_when_invariant_violated() {
         let cfg = Config {
             scroll_speed: 120.0, // 120 * (1/60) = 2.0 >= 1.0
+            ..Config::default()
+        };
+        let _ = Game::new(cfg, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "pipe_gap + 2 <= rows")]
+    fn new_panics_when_pipe_gap_too_large() {
+        // pipe_gap >= rows - 1 だと gap_top の範囲 [1, rows-1-pipe_gap] が空になり
+        // rows - 1 - pipe_gap がアンダーフローする。new で弾く。
+        let cfg = Config {
+            rows: 24,
+            pipe_gap: 23, // pipe_gap + 2 = 25 > rows(24)
             ..Config::default()
         };
         let _ = Game::new(cfg, 0);
