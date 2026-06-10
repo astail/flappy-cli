@@ -1,0 +1,44 @@
+name: Security Audit
+
+# 依存クレートの既知脆弱性（RUSTSEC）を cargo-audit で検査する。
+# lock/manifest 変更時・毎週・手動で走らせる。root と crates/web の両 lock が対象。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+      - ".github/workflows/audit.yml"
+  schedule:
+    - cron: "0 0 * * 1" # 毎週月曜 00:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit (workspace root)
+        run: cargo audit
+
+      - name: Audit (crates/web)
+        run: cargo audit
+        working-directory: crates/web
