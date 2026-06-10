@@ -1,0 +1,186 @@
+name: Release
+
+# `v*` タグの push で `flappy` バイナリをクロスコンパイルし GitHub Releases に添付する（issue #39）。
+#
+# ターゲット:
+#   - x86_64-unknown-linux-musl   (静的リンク、glibc 互換性問題を回避)
+#   - aarch64-unknown-linux-musl  (静的リンク)
+#   - aarch64-apple-darwin        (Apple Silicon)
+#
+# 配布物は `flappy-<version>-<target>.tar.gz`（バイナリ + README + LICENSE 同梱）に揃え、
+# Release 添付前に SHA256SUMS を集約する。
+# .deb / .rpm / Homebrew / crates.io はスコープ外（別 issue）。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "リリース用タグ (例: v0.1.0)。手動実行時のみ使用"
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # tag (vX.Y.Z) と crates/term/Cargo.toml の version が一致するか検証する。
+  # 不一致ならここで fail させ、ビルドへ進ませない（tag = version の担保）。
+  verify-version:
+    name: tag と Cargo.toml version の一致を検証
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: バージョン一致チェック
+        # workflow injection 対策: untrusted な可能性のある入力（workflow_dispatch の
+        # inputs.tag）は env 経由で渡し、run 本文に直接展開しない。
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          # vX.Y.Z 形式以外は弾く（誤入力 / 注入対策の二重防御）。
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::想定外の tag 形式です: ${tag}"
+            exit 1
+          fi
+          version="${tag#v}"
+          # リリース対象 bin `flappy`（flappy-term）の version を単一ソースとして照合。
+          cargo_version="$(grep -m1 '^version' crates/term/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          if [[ "${version}" != "${cargo_version}" ]]; then
+            echo "::error::tag (${tag} → ${version}) と crates/term/Cargo.toml の version (${cargo_version}) が不一致です"
+            exit 1
+          fi
+          echo "OK: version=${version}"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: verify-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            # GitHub-hosted の ubuntu-24.04-arm runner はネイティブ aarch64 なので
+            # musl ターゲット用 linker (musl-tools) を入れれば cross 不要。
+            os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-14
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain (pinned via rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: musl ツールチェインを導入 (Linux ターゲットのみ)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: cargo build --release --locked
+        run: cargo build --release --locked --target ${{ matrix.target }} -p flappy-term
+
+      - name: tarball 作成 + SHA256
+        id: package
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::想定外の tag 形式です: ${tag}"
+            exit 1
+          fi
+          version="${tag#v}"
+          target="${TARGET}"
+          archive="flappy-${version}-${target}.tar.gz"
+
+          staging="flappy-${version}-${target}"
+          mkdir -p "${staging}"
+          cp "target/${target}/release/flappy" "${staging}/"
+          cp README.md LICENSE "${staging}/"
+
+          tar czf "${archive}" "${staging}"
+          shasum -a 256 "${archive}" > "${archive}.sha256"
+
+          echo "archive=${archive}" >> "$GITHUB_OUTPUT"
+
+      - name: artifact をアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: flappy-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: GitHub Release を作成
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: SHA256SUMS を集約
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          # 個別の *.sha256 を 1 ファイルにまとめる。
+          # verify は `shasum -a 256 -c SHA256SUMS` で全アーカイブを検証できる。
+          : > SHA256SUMS
+          while read -r line; do
+            hash="${line%% *}"
+            path="${line##* }"
+            base="$(basename "${path}")"
+            echo "${hash}  ${base}" >> SHA256SUMS
+          done < <(find . -name '*.sha256' -exec cat {} \;)
+          find . -name '*.sha256' -delete
+          echo "--- dist/ ---"
+          ls -la
+          echo "--- SHA256SUMS ---"
+          cat SHA256SUMS
+
+      - name: Release を発行
+        uses: softprops/action-gh-release@v2
+        with:
+          # tag push 起動時は GITHUB_REF から自動解決される。
+          # workflow_dispatch のときは入力された tag を使う。
+          tag_name: ${{ github.event.inputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/flappy-*.tar.gz
+            dist/SHA256SUMS

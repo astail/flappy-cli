@@ -10,6 +10,9 @@ use rng::Rng;
 /// 物理の固定タイムステップ（秒）。レンダラはアキュムレータで `tick()` 回数を制御する。
 pub const DT: f32 = 1.0 / 60.0;
 
+/// ビルド時の version（= Cargo.toml の version）。term/web の画面描画（#40）で参照する。
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// チューニング値の集約。デフォルトは DESIGN §7 の初期値。
 pub struct Config {
     pub cols: u16,
