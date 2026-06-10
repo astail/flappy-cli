@@ -55,17 +55,37 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// 1 フレームを `(ox, oy)` を左上として一括描画する。棒（`█`）のみ緑、他は端末既定色。
+/// `Paint` タグを端末色へ写す。None は端末既定色（リセット）。
+fn paint_color(paint: scene::Paint) -> Option<Color> {
+    match paint {
+        scene::Paint::Pipe => Some(Color::Green),
+        scene::Paint::Bird => Some(Color::Yellow),
+        scene::Paint::None => None,
+    }
+}
+
+/// 1 フレームを `(ox, oy)` を左上として一括描画する。棒は緑・鳥は黄、他は端末既定色。
+/// 行内で同色のランをまとめ、色が変わるときだけエスケープを出して描画量を抑える。
 fn draw_scene(out: &mut impl Write, game: &Game, ox: u16, oy: u16) -> io::Result<()> {
-    let scene = scene::scene_to_string(game);
-    for (y, line) in scene.lines().enumerate() {
+    let frame = scene::render(game);
+    for (y, (line, paints)) in frame.chars.iter().zip(frame.paint.iter()).enumerate() {
         queue!(out, cursor::MoveTo(ox, oy + y as u16))?;
-        for ch in line.chars() {
-            if ch == '█' {
-                queue!(out, SetForegroundColor(Color::Green), Print(ch), ResetColor)?;
-            } else {
-                queue!(out, Print(ch))?;
+        // 現在出力中の色（None = 端末既定色）。行頭は既定色から始める。
+        let mut cur: Option<Color> = None;
+        for (&ch, &p) in line.iter().zip(paints.iter()) {
+            let want = paint_color(p);
+            if want != cur {
+                match want {
+                    Some(c) => queue!(out, SetForegroundColor(c))?,
+                    None => queue!(out, ResetColor)?,
+                }
+                cur = want;
             }
+            queue!(out, Print(ch))?;
+        }
+        // 行末で着色を残さない。
+        if cur.is_some() {
+            queue!(out, ResetColor)?;
         }
     }
     out.flush()
