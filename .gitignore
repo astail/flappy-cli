@@ -3,3 +3,5 @@ crates/web/target/
 .DS_Store
 crates/web/dist/
 .serena/
+.playwright-mcp/
+/issue-*/
