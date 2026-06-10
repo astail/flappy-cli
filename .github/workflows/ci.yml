@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# fmt/clippy/test のみ。書き込み権限は不要なので最小権限に絞る（least privilege）。
+permissions:
+  contents: read
+
 jobs:
   ci:
     runs-on: ubuntu-latest
