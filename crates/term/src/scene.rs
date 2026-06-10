@@ -39,11 +39,14 @@ pub fn scene_to_string(game: &Game) -> String {
     let best_start = (cols as usize).saturating_sub(best_text.chars().count() + 1);
     place_at(&mut grid[0], &best_text, best_start);
 
-    // 地面ライン（最下行）。
+    // 地面ライン（最下行）。右端に version を控えめに重ねる（単一ソース = core）。
     if let Some(last) = grid.last_mut() {
         for cell in last.iter_mut() {
             *cell = GROUND;
         }
+        let ver = format!("v{}", flappy_core::VERSION);
+        let start = (cols as usize).saturating_sub(ver.chars().count() + 1);
+        place_at(last, &ver, start);
     }
 
     // 棒（占有述語を判定と共有）。
@@ -163,10 +166,19 @@ mod tests {
         assert!(ls[0].contains("BEST 0"));
         // 鳥は (col 12, row 12)。
         assert_eq!(ls[12].chars().nth(12), Some('●'));
-        // 地面ラインは全列 ─。
-        assert_eq!(ls[23], "─".repeat(64));
+        // 地面ラインは ─ 基調で、右端に version を重ねる。
+        assert!(ls[23].starts_with(&"─".repeat(40)));
+        assert!(ls[23].contains(&format!("v{}", flappy_core::VERSION)));
         assert!(scene.contains("F L A P P Y"));
         assert!(scene.contains("press SPACE"));
+    }
+
+    #[test]
+    fn version_is_drawn_from_core_const() {
+        let g = Game::new(Config::default(), 1);
+        let scene = scene_to_string(&g);
+        // ハードコードせず core の VERSION を参照していること。
+        assert!(scene.contains(&format!("v{}", flappy_core::VERSION)));
     }
 
     #[test]
