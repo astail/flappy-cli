@@ -71,11 +71,37 @@ fn draw_scene(out: &mut impl Write, game: &Game, ox: u16, oy: u16) -> io::Result
     out.flush()
 }
 
+/// 文字列の端末表示幅（全角=2, 半角=1）を返す簡易計算。`unicode-width` 依存を避け、
+/// CJK 系の主要レンジだけを 2 幅として扱う最小実装（draw_pause の和文メッセージ用）。
+fn display_width(s: &str) -> usize {
+    s.chars().map(char_width).sum()
+}
+
+/// 1 文字の表示幅。East Asian Wide/Fullwidth に概ね相当する主要レンジを 2 幅とする。
+fn char_width(c: char) -> usize {
+    let cp = c as u32;
+    let wide = matches!(cp,
+        0x1100..=0x115F      // Hangul Jamo
+        | 0x2E80..=0xA4CF    // CJK 部首〜CJK統合漢字〜Yi（記号・かな・漢字を広くカバー）
+        | 0xAC00..=0xD7A3    // Hangul 音節
+        | 0xF900..=0xFAFF    // CJK 互換漢字
+        | 0xFE30..=0xFE4F    // CJK 互換形
+        | 0xFF00..=0xFF60    // 全角形
+        | 0xFFE0..=0xFFE6    // 全角記号
+    );
+    if wide {
+        2
+    } else {
+        1
+    }
+}
+
 /// 端末が最小サイズ未満のときのポーズ表示（中央にメッセージ）。
 fn draw_pause(out: &mut impl Write, term: (u16, u16)) -> io::Result<()> {
     let (tw, th) = term;
     let msg = "端末を 64x24 以上にしてください";
-    let x = (tw as usize).saturating_sub(msg.chars().count()) / 2;
+    // 端末は全角を 2 セル幅で表示するため、コードポイント数ではなく表示幅で中央寄せする。
+    let x = (tw as usize).saturating_sub(display_width(msg)) / 2;
     queue!(out, cursor::MoveTo(x as u16, th / 2), Print(msg))?;
     out.flush()
 }
@@ -174,4 +200,37 @@ fn main() -> io::Result<()> {
 
     Ok(())
     // ここで `_guard` が drop され端末が復帰する。
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{char_width, display_width};
+
+    #[test]
+    fn ascii_is_one_cell_each() {
+        assert_eq!(display_width(""), 0);
+        assert_eq!(display_width("64x24"), 5);
+        assert_eq!(display_width("F L A P P Y"), 11);
+        assert_eq!(char_width(' '), 1);
+        assert_eq!(char_width('A'), 1);
+    }
+
+    #[test]
+    fn cjk_is_two_cells_each() {
+        // ひらがな・漢字はそれぞれ 2 幅。
+        assert_eq!(char_width('端'), 2);
+        assert_eq!(char_width('を'), 2);
+        assert_eq!(display_width("端末"), 4);
+        assert_eq!(display_width("以上"), 4);
+    }
+
+    #[test]
+    fn pause_message_width_counts_fullwidth() {
+        // draw_pause の実メッセージ。和文 12 文字(=24) + 半角 " 64x24 "(=7) = 31。
+        let msg = "端末を 64x24 以上にしてください";
+        assert_eq!(msg.chars().count(), 19);
+        assert_eq!(display_width(msg), 31);
+        // コードポイント数より表示幅のほうが大きい（バグの本質）。
+        assert!(display_width(msg) > msg.chars().count());
+    }
 }
