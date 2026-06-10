@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # root workspace（core / term）の依存。
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+
+  # web は別 lock を持つため独立して登録する。
+  - package-ecosystem: cargo
+    directory: /crates/web
+    schedule:
+      interval: weekly
