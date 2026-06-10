@@ -1,8 +1,16 @@
 name: CI
 
 on:
+  # push は main のみ（直 push / merge の検証）。ブランチの PR 検証は pull_request に任せ、
+  # 同一 commit で push と pull_request が二重起動するのを防ぐ。
   push:
+    branches: [main]
   pull_request:
+
+# 同一 ref の進行中 run はキャンセルして無駄 run を削る。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 # fmt/clippy/test のみ。書き込み権限は不要なので最小権限に絞る（least privilege）。
 permissions:
