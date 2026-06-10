@@ -97,29 +97,45 @@ impl Game {
             "config violates pipe_gap + 2 <= rows (gap_top range would be empty)"
         );
 
-        let mut rng = Rng::new(seed);
-        // 鳥は画面中央付近から開始。
-        let bird_y = cfg.rows as f32 / 2.0;
-        // 最初の棒は右端（x = cols）に 1 本だけ。鳥に届くまで約 1 画面ぶんの助走になり開始即死を防ぐ。
-        let gap_top = rng.gen_range_inclusive(1, cfg.rows - 1 - cfg.pipe_gap);
-        let pipes = vec![Pipe {
-            x: cfg.cols as f32,
-            gap_top,
-            passed: false,
-        }];
-        let dist_to_next = cfg.pipe_spacing;
-
-        Self {
+        let mut game = Self {
             cfg,
-            rng,
+            rng: Rng::new(seed),
             phase: Phase::Ready,
-            bird_y,
+            bird_y: 0.0,
             bird_vy: 0.0,
-            pipes,
-            dist_to_next,
+            pipes: Vec::new(),
+            dist_to_next: 0.0,
             score: 0,
             best: 0,
+        };
+        game.reset_play_state();
+        game
+    }
+
+    /// gap_top を抽選し、右端（x = cols）に未通過の Pipe を 1 本生成する。
+    /// gap_top の抽選範囲 `[1, rows - 1 - pipe_gap]` はここが単一ソース（new / tick / restart 共通）。
+    fn spawn_pipe(&mut self) -> Pipe {
+        let gap_top = self
+            .rng
+            .gen_range_inclusive(1, self.cfg.rows - 1 - self.cfg.pipe_gap);
+        Pipe {
+            x: self.cfg.cols as f32,
+            gap_top,
+            passed: false,
         }
+    }
+
+    /// プレイ開始状態へ初期化する（new / restart 共通）。`best` と rng ストリームは touch しない。
+    /// 鳥を画面中央付近へ、最初の棒を右端に 1 本（鳥に届くまで約 1 画面ぶんの助走で開始即死を防ぐ）、
+    /// `dist_to_next` を spacing に、phase を Ready、score を 0 にする。
+    fn reset_play_state(&mut self) {
+        self.bird_y = self.cfg.rows as f32 / 2.0;
+        self.bird_vy = 0.0;
+        let pipe = self.spawn_pipe();
+        self.pipes = vec![pipe];
+        self.dist_to_next = self.cfg.pipe_spacing;
+        self.phase = Phase::Ready;
+        self.score = 0;
     }
 
     pub fn phase(&self) -> Phase {
@@ -180,14 +196,8 @@ impl Game {
         //    剰余を保持して spacing が drift しないよう `+=` する。
         self.dist_to_next -= dx;
         if self.dist_to_next <= 0.0 {
-            let gap_top = self
-                .rng
-                .gen_range_inclusive(1, self.cfg.rows - 1 - self.cfg.pipe_gap);
-            self.pipes.push(Pipe {
-                x: self.cfg.cols as f32,
-                gap_top,
-                passed: false,
-            });
+            let pipe = self.spawn_pipe();
+            self.pipes.push(pipe);
             self.dist_to_next += self.cfg.pipe_spacing;
         }
 
@@ -228,22 +238,9 @@ impl Game {
     /// best を保持してゲームを初期化する。rng は再シードせず既存の決定論ストリームを
     /// そのまま継続するため、リスタートのたびに棒配置は変わる（同一プレイの繰り返しを避ける）。
     pub fn restart(&mut self) {
-        let best = self.best;
-        // bird は画面中央付近、最初の棒を右端に 1 本だけ（new と同じ初期化）。
-        self.bird_y = self.cfg.rows as f32 / 2.0;
-        self.bird_vy = 0.0;
-        let gap_top = self
-            .rng
-            .gen_range_inclusive(1, self.cfg.rows - 1 - self.cfg.pipe_gap);
-        self.pipes = vec![Pipe {
-            x: self.cfg.cols as f32,
-            gap_top,
-            passed: false,
-        }];
-        self.dist_to_next = self.cfg.pipe_spacing;
-        self.phase = Phase::Ready;
-        self.score = 0;
-        self.best = best;
+        // new と同じ初期化。reset_play_state は best も rng ストリームも触らないため、
+        // best は維持され、棒配置はリスタートのたびに変わる（同一プレイの繰り返しを避ける）。
+        self.reset_play_state();
     }
 }
 
