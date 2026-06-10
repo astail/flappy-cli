@@ -3,7 +3,7 @@
 [![CI](https://github.com/astail/flappy-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/astail/flappy-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-ターミナル（mac / ubuntu）とブラウザの両方で動く Flappy Bird 系のドットゲーム。スペースで上昇・重力で落下し、横スクロールする上下の棒の隙間を抜け続けるエンドレス（スコア制）。見た目は Chrome 恐竜ゲーム風のシンプルなドット絵。
+ターミナル（mac / Linux）とブラウザの両方で動く Flappy Bird 系のドットゲーム。スペースで上昇・重力で落下し、横スクロールする上下の棒の隙間を抜け続けるエンドレス（スコア制）。見た目は Chrome 恐竜ゲーム風のシンプルなドット絵。
 
 🎮 **ブラウザ版で今すぐ遊ぶ**: <https://astail.github.io/flappy-cli/>
 
