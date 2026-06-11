@@ -162,7 +162,10 @@ fn main() {
     // canvas = 64*16 × 24*16（論理グリッドは core が一意の真実）。
     // game は RAF 描画と入力ハンドラで共有するため Rc<RefCell> で包む（JS は単一
     // スレッドなので両者の borrow は実行時に重ならない）。
-    let game = Rc::new(RefCell::new(Game::new(Config::default(), 1)));
+    let game = Rc::new(RefCell::new(Game::new(
+        Config::default(),
+        js_sys::Date::now() as u64,
+    )));
     {
         let cfg = game.borrow();
         let cfg = cfg.config();

@@ -24,6 +24,7 @@ version = "0.3.0"
 dependencies = [
  "flappy-core",
  "gloo-events",
+ "js-sys",
  "wasm-bindgen",
  "web-sys",
 ]
