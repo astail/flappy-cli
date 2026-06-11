@@ -406,6 +406,26 @@ mod tests {
     }
 
     #[test]
+    fn dead_bird_is_tagged_bird_dead() {
+        // 死亡鳥セルが Paint::BirdDead でタグ付けされること（term 赤 / web #c0392b の色退行ガード）。
+        // scene_to_string は chars のみで paint を捨てるため、paint タグは render() で直接検証する。
+        let mut g = Game::new(Config::default(), 1);
+        g.flap();
+        for _ in 0..300 {
+            g.tick();
+            if g.phase() == Phase::GameOver {
+                break;
+            }
+        }
+        assert_eq!(g.phase(), Phase::GameOver);
+        let frame = render(&g);
+        assert!(
+            frame.paint.iter().flatten().any(|p| *p == Paint::BirdDead),
+            "dead bird cell should be tagged Paint::BirdDead"
+        );
+    }
+
+    #[test]
     fn braille_packs_mask_to_codepoint() {
         assert_eq!(braille(0), ' ');
         assert_eq!(braille(0x01), '\u{2801}');
