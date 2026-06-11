@@ -67,13 +67,20 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.fill_rect(0.0, 0.0, w, h);
 
     // 棒（緑）。占有述語を判定と共有し、棒セルだけを塗る。
+    // x は term の dot-x と同じ 1/2 セル刻み（(x*2).round()/2）で量子化し、スクロールの段差を
+    // term と揃える（CLAUDE.md: term/web は同じ作りに揃える）。幅は 1 セル、端は canvas が
+    // クリップする（term の dot 単位クリップと等価）。
+    // 既知の制約（term #71 と共通）: 衝突は core の round セル（p.x.round()）で判定するため
+    // 視覚位置との差は最大 1/4 セル。描画セルは衝突セルを常に含むので「触れて見えないのに死ぬ」
+    // ことはない（term 側にテスト pipe_visual_cells_always_cover_collision_cell）。
     ctx.set_fill_style_str(COLOR_PIPE);
     for p in game.pipes() {
-        let c = p.x.round() as i32;
-        if c >= 0 && (c as u16) < cols {
+        let x = (p.x * 2.0).round() / 2.0;
+        let px = x as f64 * cell;
+        if px + cell > 0.0 && px < w {
             for row in 0..rows as i32 {
                 if pipe_blocks_row(p.gap_top, cfg.pipe_gap, rows, row) {
-                    ctx.fill_rect(c as f64 * cell, row as f64 * cell, cell, cell);
+                    ctx.fill_rect(px, row as f64 * cell, cell, cell);
                 }
             }
         }
@@ -84,10 +91,13 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.fill_rect(0.0, 0.0, w, cell);
     ctx.fill_rect(0.0, (rows as f64 - 1.0) * cell, w, cell);
 
-    // 鳥（塗り円。衝突と同じ丸めのセル）。GameOver は赤。
-    let (bc, br) = game.bird_cell();
-    let cx = (bc as f64 + 0.5) * cell;
-    let cy = (br as f64 + 0.5) * cell;
+    // 鳥（塗り円）。横は bird_col 固定、縦は term の dot-y と同じ 1/4 セル刻み
+    // （(bird_y*4).round()/4）で量子化し、上下動の段差を term と揃える。GameOver は赤。
+    // 既知の制約（term #71 と共通）: 衝突は core の round 行（bird_cell()）で判定するため、
+    // 視覚位置と衝突行は最大 0.5 セルずれうる（視覚は真の位置に近い側へ倒す）。
+    let cx = (cfg.bird_col as f64 + 0.5) * cell;
+    let qy = (game.bird_y() * 4.0).round() / 4.0;
+    let cy = (qy as f64 + 0.5) * cell;
     let r = cell * 0.5 - 1.0;
     ctx.set_fill_style_str(if game.phase() == Phase::GameOver {
         COLOR_BIRD_DEAD

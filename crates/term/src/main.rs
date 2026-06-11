@@ -55,10 +55,12 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// `Paint` タグを端末色へ写す。鳥は端末既定色（web の鳥 #333 と揃える）、None も既定色。
+/// `Paint` タグを端末色へ写す。生存鳥・None は端末既定色（web の鳥 #333 と揃える）、
+/// 死亡鳥は赤（web の #c0392b と揃える）、棒は緑。
 fn paint_color(paint: scene::Paint) -> Option<Color> {
     match paint {
         scene::Paint::Pipe => Some(Color::Green),
+        scene::Paint::BirdDead => Some(Color::Red),
         scene::Paint::Bird | scene::Paint::None => None,
     }
 }

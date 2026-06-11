@@ -17,6 +17,8 @@ pub enum Paint {
     None,
     Pipe,
     Bird,
+    /// 死亡した鳥（✕）。生存鳥（既定色）と区別して赤で描く（web の #c0392b と揃える）。
+    BirdDead,
 }
 
 /// 1 フレーム。`chars` が描画グリフ、`paint` が同サイズの塗り分けタグ。
@@ -214,11 +216,11 @@ fn overlay_text(
         Phase::GameOver => {
             draw_gameover_box(chars, paint, cols, game.score);
             // 死亡した鳥は ✕ の文字で表す（render はブロブを描かない）。棒セルの上で
-            // 死んだ場合も ✕ が棒色にならないよう paint を Bird にする。
+            // 死んだ場合も ✕ が棒色にならないよう paint を BirdDead にする（赤で描く）。
             let (bc, br) = game.bird_cell();
             if (br as usize) < rows as usize && bc < cols {
                 chars[br as usize][bc as usize] = BIRD_DEAD;
-                paint[br as usize][bc as usize] = Paint::Bird;
+                paint[br as usize][bc as usize] = Paint::BirdDead;
             }
         }
         Phase::Playing => {}
