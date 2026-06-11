@@ -6,7 +6,7 @@
 //! 判定（core の占有述語）と描画が同じセル定義を共有しつつ、ゴールデンテストが ANSI に汚されず
 //! 安定する。
 
-use flappy_core::{pipe_blocks_row, Game, Phase};
+use flappy_core::{pipe_blocks_row, Game, Phase, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE};
 
 const BIRD_DEAD: char = '✕';
 const GROUND: char = '─';
@@ -233,18 +233,19 @@ pub fn scene_to_string(game: &Game) -> String {
     render(game).to_text()
 }
 
-/// GameOver の罫線ボックスを中央へ描く（内側幅 20）。
+/// GameOver の罫線ボックスを中央へ描く（内側幅 = 最長行の retry 案内に合わせる）。
+/// 文言は core の定数を参照する（#76: web と同一ソースで文言ズレを防ぐ）。
 fn draw_gameover_box(chars: &mut [Vec<char>], paint: &mut [Vec<Paint>], cols: u16, score: u32) {
-    const INNER: usize = 20;
-    let start = (cols as usize).saturating_sub(INNER + 2) / 2;
+    let inner_w = GAMEOVER_RETRY_HINT.chars().count();
+    let start = (cols as usize).saturating_sub(inner_w + 2) / 2;
     let top = 2usize;
 
-    let border_top: String = format!("╔{}╗", "═".repeat(INNER));
-    let border_bottom: String = format!("╚{}╝", "═".repeat(INNER));
+    let border_top: String = format!("╔{}╗", "═".repeat(inner_w));
+    let border_bottom: String = format!("╚{}╝", "═".repeat(inner_w));
     let line = |inner: &str| -> String {
-        // inner を中央寄せして 20 幅にし、両端に罫線を付ける。
+        // inner を中央寄せして inner_w 幅にし、両端に罫線を付ける。
         let tw = inner.chars().count();
-        let pad = INNER.saturating_sub(tw);
+        let pad = inner_w.saturating_sub(tw);
         let left = pad / 2;
         let right = pad - left;
         format!("║{}{}{}║", " ".repeat(left), inner, " ".repeat(right))
@@ -252,10 +253,12 @@ fn draw_gameover_box(chars: &mut [Vec<char>], paint: &mut [Vec<Paint>], cols: u1
 
     let body = [
         border_top,
-        line("GAME  OVER"),
+        line(GAMEOVER_TITLE),
         line(&format!("SCORE {score}")),
-        line("SPACE / r : retry"),
-        line("q         : quit"),
+        line(GAMEOVER_RETRY_HINT),
+        // quit は term 固有（web に終了概念がない。DESIGN §2 の許容差）。
+        // ':' の位置を retry 行に揃える。
+        line("q                 : quit"),
         border_bottom,
     ];
     for (i, text) in body.iter().enumerate() {
@@ -397,9 +400,9 @@ mod tests {
         }
         assert_eq!(g.phase(), Phase::GameOver);
         let scene = scene_to_string(&g);
-        assert!(scene.contains("GAME  OVER"));
-        assert!(scene.contains("SPACE / r : retry"));
-        assert!(scene.contains("q         : quit"));
+        assert!(scene.contains(GAMEOVER_TITLE));
+        assert!(scene.contains(GAMEOVER_RETRY_HINT));
+        assert!(scene.contains("q                 : quit"));
         assert!(scene.contains('✕'), "dead bird should render as ✕");
         // スコアボックスに現在スコア（落下死なので 0）。
         assert!(scene.contains("SCORE 0"));
