@@ -39,6 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # workflow_dispatch 起動時は入力された tag をチェックアウトする。
+          # tag push 時は inputs.tag が空なので github.ref にフォールバックする。
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: バージョン一致チェック
         # workflow injection 対策: untrusted な可能性のある入力（workflow_dispatch の
@@ -85,6 +89,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # workflow_dispatch 起動時は入力された tag をチェックアウトする。
+          # tag push 時は inputs.tag が空なので github.ref にフォールバックする。
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Setup Rust toolchain (pinned via rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@v1
