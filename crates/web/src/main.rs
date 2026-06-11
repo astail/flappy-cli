@@ -67,13 +67,20 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.fill_rect(0.0, 0.0, w, h);
 
     // 棒（緑）。占有述語を判定と共有し、棒セルだけを塗る。
+    // x は term の dot-x と同じ 1/2 セル刻み（(x*2).round()/2）で量子化し、スクロールの段差を
+    // term と揃える（CLAUDE.md: term/web は同じ作りに揃える）。幅は 1 セル、端は canvas が
+    // クリップする（term の dot 単位クリップと等価）。
+    // 既知の制約（term #71 と共通）: 衝突は core の round セル（p.x.round()）で判定するため
+    // 視覚位置との差は最大 1/4 セル。描画セルは衝突セルを常に含むので「触れて見えないのに死ぬ」
+    // ことはない（term 側にテスト pipe_visual_cells_always_cover_collision_cell）。
     ctx.set_fill_style_str(COLOR_PIPE);
     for p in game.pipes() {
-        let c = p.x.round() as i32;
-        if c >= 0 && (c as u16) < cols {
+        let x = (p.x * 2.0).round() / 2.0;
+        let px = x as f64 * cell;
+        if px + cell > 0.0 && px < w {
             for row in 0..rows as i32 {
                 if pipe_blocks_row(p.gap_top, cfg.pipe_gap, rows, row) {
-                    ctx.fill_rect(c as f64 * cell, row as f64 * cell, cell, cell);
+                    ctx.fill_rect(px, row as f64 * cell, cell, cell);
                 }
             }
         }
@@ -84,16 +91,24 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.fill_rect(0.0, 0.0, w, cell);
     ctx.fill_rect(0.0, (rows as f64 - 1.0) * cell, w, cell);
 
-    // 鳥（塗り円。衝突と同じ丸めのセル）。GameOver は赤。
-    let (bc, br) = game.bird_cell();
-    let cx = (bc as f64 + 0.5) * cell;
-    let cy = (br as f64 + 0.5) * cell;
-    let r = cell * 0.5 - 1.0;
-    ctx.set_fill_style_str(if game.phase() == Phase::GameOver {
-        COLOR_BIRD_DEAD
+    // 鳥（塗り円）。横は bird_col 固定。縦は phase で量子化を分ける:
+    // - 生存時: (bird_y*4).round()/4 の 1/4 セル刻み（term の dot-y と同刻み）でセル中心に置く。
+    //   段差は term と一致。なお term の生存鳥は 2×4 ドットのブロブ、web は円で形状/サイズ自体が
+    //   異なる（完全一致は元々不可能）ため、ここはセル中心(+0.5)とし刻み一致を優先する。
+    // - GameOver: term は ✕ を round 行（bird_cell()）に置くため、web も bird_cell() のセル中心に
+    //   合わせる。死亡鳥は静止物で量子化の恩恵が無く、qy だと term の ✕ と最大 1/2 セルずれるため。
+    // 既知の制約（term #71 と共通）: 衝突は core の round 行（bird_cell()）で判定するため、生存時の
+    // 視覚位置と衝突行は最大 0.5 セルずれうる（視覚は真の位置に近い側へ倒す）。GameOver は赤。
+    let cx = (cfg.bird_col as f64 + 0.5) * cell;
+    let dead = game.phase() == Phase::GameOver;
+    let cy = if dead {
+        (game.bird_cell().1 as f64 + 0.5) * cell
     } else {
-        COLOR_BIRD
-    });
+        let qy = (game.bird_y() * 4.0).round() / 4.0;
+        (qy as f64 + 0.5) * cell
+    };
+    let r = cell * 0.5 - 1.0;
+    ctx.set_fill_style_str(if dead { COLOR_BIRD_DEAD } else { COLOR_BIRD });
     ctx.begin_path();
     let _ = ctx.arc(cx, cy, r, 0.0, std::f64::consts::PI * 2.0);
     ctx.fill();
