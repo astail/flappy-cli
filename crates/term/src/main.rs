@@ -1,8 +1,8 @@
 //! flappy-term（bin 名 `flappy`）— crossterm でターミナル描画する薄いレンダラ。
 //!
 //! 端末ライフサイクル（alternate screen / raw mode / カーソル非表示 / mouse capture）を
-//! RAII ガードと panic hook で安全に管理する。core 状態を文字グリッドへ変換する純粋関数
-//! [`scene::scene_to_string`] を一括描画し、[`input`] で Space/クリック/r/q/Esc を core
+//! RAII ガードと panic hook で安全に管理する。core 状態をフレームへ変換する純粋関数
+//! [`scene::render`] を一括描画し、[`input`] で Space/クリック/r/q/Esc を core
 //! 操作へルーティングし、実時間を蓄積して固定 [`flappy_core::DT`] 刻みで物理を進める
 //! ループを回す。端末サイズに応じてセンタリング（レターボックス）し、最小サイズ
 //! (64×24) 未満ではプレイを止めてリサイズを促す（[`layout`]）。
@@ -55,17 +55,36 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// 1 フレームを `(ox, oy)` を左上として一括描画する。棒（`█`）のみ緑、他は端末既定色。
+/// `Paint` タグを端末色へ写す。鳥は端末既定色（web の鳥 #333 と揃える）、None も既定色。
+fn paint_color(paint: scene::Paint) -> Option<Color> {
+    match paint {
+        scene::Paint::Pipe => Some(Color::Green),
+        scene::Paint::Bird | scene::Paint::None => None,
+    }
+}
+
+/// 1 フレームを `(ox, oy)` を左上として一括描画する。棒は緑、鳥・他は端末既定色。
+/// 行内で同色のランをまとめ、色が変わるときだけエスケープを出して描画量を抑える。
 fn draw_scene(out: &mut impl Write, game: &Game, ox: u16, oy: u16) -> io::Result<()> {
-    let scene = scene::scene_to_string(game);
-    for (y, line) in scene.lines().enumerate() {
+    let frame = scene::render(game);
+    for (y, (line, paints)) in frame.chars.iter().zip(frame.paint.iter()).enumerate() {
         queue!(out, cursor::MoveTo(ox, oy + y as u16))?;
-        for ch in line.chars() {
-            if ch == '█' {
-                queue!(out, SetForegroundColor(Color::Green), Print(ch), ResetColor)?;
-            } else {
-                queue!(out, Print(ch))?;
+        // 現在出力中の色（None = 端末既定色）。行頭は既定色から始める。
+        let mut cur: Option<Color> = None;
+        for (&ch, &p) in line.iter().zip(paints.iter()) {
+            let want = paint_color(p);
+            if want != cur {
+                match want {
+                    Some(c) => queue!(out, SetForegroundColor(c))?,
+                    None => queue!(out, ResetColor)?,
+                }
+                cur = want;
             }
+            queue!(out, Print(ch))?;
+        }
+        // 行末で着色を残さない。
+        if cur.is_some() {
+            queue!(out, ResetColor)?;
         }
     }
     out.flush()

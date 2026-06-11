@@ -159,6 +159,11 @@ impl Game {
         self.bird_y.round() as i32
     }
 
+    /// 鳥の連続行（サブセル描画用。衝突判定は bird_cell() の round を使う）。
+    pub fn bird_y(&self) -> f32 {
+        self.bird_y
+    }
+
     /// 鳥の描画セル `(col, row)`。衝突判定と同一の丸め。
     pub fn bird_cell(&self) -> (u16, u16) {
         let col = (self.cfg.bird_col as i32).max(0) as u16;
