@@ -169,6 +169,9 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
 }
 
 fn main() {
+    // wasm の panic を JS コンソールに Rust のメッセージ・位置情報付きで出す。
+    console_error_panic_hook::set_once();
+
     let document = window().document().expect("no document");
     let canvas = document
         .get_element_by_id("canvas")
