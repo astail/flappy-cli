@@ -13,7 +13,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use flappy_core::{pipe_blocks_row, Config, Game, Phase, DT, VERSION};
+use flappy_core::{
+    pipe_blocks_row, Config, Game, Phase, DT, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, VERSION,
+};
 use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -141,11 +143,26 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
             let _ = ctx.fill_text("──  press SPACE  ──", w / 2.0, 8.5 * cell);
         }
         Phase::GameOver => {
-            ctx.set_font("bold 24px monospace");
-            let _ = ctx.fill_text("GAME  OVER", w / 2.0, 3.5 * cell);
+            // 罫線ボックス相当の枠（#76: term の draw_gameover_box と同じ行・同じ幅）。
+            // term はボックス文字で背面の棒を隠すため、web も内側を背景色で塗ってから枠線を引く。
+            let box_w_cells = (GAMEOVER_RETRY_HINT.chars().count() + 2) as f64; // 罫線込み幅（セル）
+            let bx = ((cols as f64 - box_w_cells) / 2.0).floor() * cell;
+            let by = 2.0 * cell;
+            let (bw, bh) = (box_w_cells * cell, 6.0 * cell);
+            ctx.set_fill_style_str(COLOR_BG);
+            ctx.fill_rect(bx, by, bw, bh);
+            ctx.set_stroke_style_str(COLOR_TEXT);
+            ctx.stroke_rect(bx, by, bw, bh);
+            // 文言は core の定数（term と同一ソース）。行位置も term のボックス内行に合わせ、
+            // x は枠の中心（キャンバス中心とは 0.5 セルずれる）に揃える。
+            let box_cx = bx + bw / 2.0;
+            ctx.set_fill_style_str(COLOR_TEXT);
+            ctx.set_font("bold 16px monospace");
+            let _ = ctx.fill_text(GAMEOVER_TITLE, box_cx, 3.5 * cell);
             ctx.set_font("16px monospace");
-            let _ = ctx.fill_text(&format!("SCORE {}", game.score), w / 2.0, 5.5 * cell);
-            let _ = ctx.fill_text("SPACE / click / r : retry", w / 2.0, 7.0 * cell);
+            let _ = ctx.fill_text(&format!("SCORE {}", game.score), box_cx, 4.5 * cell);
+            let _ = ctx.fill_text(GAMEOVER_RETRY_HINT, box_cx, 5.5 * cell);
+            // 「q : quit」行は term のみ（web に終了概念がないため。DESIGN §2 の許容差）。
         }
         Phase::Playing => {}
     }

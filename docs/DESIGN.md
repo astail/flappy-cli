@@ -126,14 +126,16 @@ loop {
 ```
  SCORE 7                         BEST 12
                                           
-         ╔════════════════════╗           
-         ║     GAME  OVER     ║           
-         ║     SCORE    7     ║           
-         ║  SPACE / r : retry ║           
-    ✕    ║  q         : quit  ║           
-         ╚════════════════════╝           
+       ╔═════════════════════════╗        
+       ║       GAME  OVER        ║        
+       ║         SCORE 7         ║        
+       ║SPACE / click / r : retry║        
+    ✕  ║q                 : quit ║        
+       ╚═════════════════════════╝        
 ──────────────────────────────────────────
 ```
+
+文言（GAME  OVER / retry 案内）は `flappy-core` の定数（`GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`）を term/web が共有する（文言ズレの再発防止）。`q : quit` 行だけは **term のみ**（web に終了概念がないため省略する。許容差）。web は同じ行・同じ幅の枠を `stroke_rect` で描く。
 
 ### 要素の対応（term ⇄ web で見た目を揃える）
 

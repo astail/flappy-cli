@@ -13,6 +13,12 @@ pub const DT: f32 = 1.0 / 60.0;
 /// ビルド時の version（= Cargo.toml の version）。term/web の画面描画（#40）で参照する。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// GameOver 画面のタイトル（#76: term/web が同一ソースを参照し文言ズレを防ぐ）。
+pub const GAMEOVER_TITLE: &str = "GAME  OVER";
+
+/// GameOver 画面の retry 案内（SPACE / click は term・web 共通の主操作）。
+pub const GAMEOVER_RETRY_HINT: &str = "SPACE / click / r : retry";
+
 /// チューニング値の集約。デフォルトは DESIGN §7 の初期値。
 pub struct Config {
     pub cols: u16,
