@@ -11,3 +11,9 @@ updates:
     directory: /crates/web
     schedule:
       interval: weekly
+
+  # GitHub Actions の action 更新（SHA ピンの追従もここで自動化する）。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -29,11 +29,13 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@7a79fe8c3a13344501c80d99cae481c1c9085912 # v2.81.10
         with:
+          # cargo-audit は「最新の RUSTSEC advisory を拾う」ことが目的のため、
+          # あえてバージョン固定しない（advisory DB は実行時に最新を取得する）。
           tool: cargo-audit
 
       - name: Audit (workspace root)

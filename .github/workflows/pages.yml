@@ -19,17 +19,18 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Rust toolchain (+ wasm32 target)
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
         with:
           target: wasm32-unknown-unknown
 
       - name: Install trunk
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@7a79fe8c3a13344501c80d99cae481c1c9085912 # v2.81.10
         with:
-          tool: trunk
+          # 本番 Pages ビルドの再現性のためバージョン固定（ci.yml と揃える）。
+          tool: trunk@0.21.14
 
       # Pages のサブパス（/flappy-cli/）に合わせて public-url を指定する。
       - name: Trunk build (release)
@@ -40,9 +41,9 @@ jobs:
       - name: Add .nojekyll
         run: touch crates/web/dist/.nojekyll
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: crates/web/dist
 
@@ -59,4 +60,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
