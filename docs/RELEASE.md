@@ -35,9 +35,10 @@ git checkout -b release/v0.2.0
 
 # Cargo.toml の version を 3 クレートとも書き換える（0.1.0 → 0.2.0）
 
-# Cargo.lock を同期（web は root から exclude された独立 workspace なので別途）
-cargo update -p flappy-core -p flappy-term --precise 0.2.0
-( cd crates/web && cargo update -p flappy-core -p flappy-web --precise 0.2.0 )
+# Cargo.lock を同期（workspace member は Cargo.toml の値に追従するので -w で十分。
+# web は root から exclude された独立 workspace なので別途）
+cargo update -w
+( cd crates/web && cargo update -w )
 
 # golden frame と README の version 文字列を 0.2.0 に更新
 #   crates/term/src/golden/ready.txt の `...v0.1.0─` → `...v0.2.0─`（桁数が同じか注意）
@@ -47,7 +48,7 @@ cargo update -p flappy-core -p flappy-term --precise 0.2.0
 検証（push 前にローカルで CI と同じチェックを通す）:
 
 ```bash
-cargo test --workspace --locked   # golden test を含め全パスすること
+cargo test --workspace --locked   # golden test を含め全パスすること（Cargo.lock が未同期なら --locked が fail して検出できる）
 ```
 
 PR を作成し、CI（ci / wasm / audit）がグリーンになったら squash merge する。
