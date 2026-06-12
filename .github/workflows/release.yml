@@ -32,7 +32,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # tag (vX.Y.Z) と crates/term/Cargo.toml の version が一致するか検証する。
+  # tag (vX.Y.Z) と crates/core / crates/term / crates/web の各 Cargo.toml の
+  # version が一致するか検証する。
   # 不一致ならここで fail させ、ビルドへ進ませない（tag = version の担保）。
   verify-version:
     name: tag と Cargo.toml version の一致を検証
@@ -63,12 +64,14 @@ jobs:
             exit 1
           fi
           version="${tag#v}"
-          # リリース対象 bin `flappy`（flappy-term）の version を単一ソースとして照合。
-          cargo_version="$(grep -m1 '^version' crates/term/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-          if [[ "${version}" != "${cargo_version}" ]]; then
-            echo "::error::tag (${tag} → ${version}) と crates/term/Cargo.toml の version (${cargo_version}) が不一致です"
-            exit 1
-          fi
+          # version は 3 クレートで手動同期する運用（docs/RELEASE.md）のため、全 Cargo.toml を照合。
+          for toml in crates/core/Cargo.toml crates/term/Cargo.toml crates/web/Cargo.toml; do
+            cargo_version="$(grep -m1 '^version' "${toml}" | sed -E 's/.*"([^"]+)".*/\1/')"
+            if [[ "${version}" != "${cargo_version}" ]]; then
+              echo "::error::tag (${tag} → ${version}) と ${toml} の version (${cargo_version}) が不一致です"
+              exit 1
+            fi
+          done
           echo "OK: version=${version}"
 
   build:
