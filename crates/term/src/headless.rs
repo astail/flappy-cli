@@ -61,6 +61,7 @@ mod tests {
         // autopilot が隙間を追従できる seed の実測ゴールデン（非ゼロ）。
         // 単純 bang-bang のため隙間が端寄りの seed（例: 1）では早期に死んで 0 になるが、
         // それも決定論的に安定した出力。
+        // ゴールデン値の定義はここ 1 箇所のみ（tests/headless.rs は score > 0 までに留める）。
         assert_eq!(run_headless(3, 600), 4);
     }
 }
