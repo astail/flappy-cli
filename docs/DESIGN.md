@@ -61,6 +61,8 @@ flappy-cli/
 
 web の Space は `preventDefault` でページスクロールを抑止する。
 
+Space 押しっぱなし（キーリピート）時の連続フラップは term/web で挙動が異なる（**意図的な許容差**）: web は `keydown` の `event.repeat` を無視して 1 回だけフラップするが、term は raw mode の標準入力では端末のオートリピートと新規打鍵を区別できないため連続フラップになる（kitty keyboard protocol は未使用方針）。
+
 ### ゲームループ（term / web 共通の流れ）
 
 物理は**固定タイムステップ**で進む。両プラットフォームは「実時間を蓄積し、固定 `DT` 刻みで core を進め、状態を描画する」だけ（描画頻度に依存しない＝term/web で同一挙動・決定論）。
@@ -251,7 +253,7 @@ pub struct Game {
 ## 5. web クレート（flappy-web）— web-sys で canvas 描画
 
 - 通常の **binary（`fn main()`）を wasm32 にビルド**（cdylib ではない）。依存: `wasm-bindgen`, `web-sys`（Window/Document/HtmlCanvasElement/CanvasRenderingContext2d/KeyboardEvent 等）, `flappy-core`。RAF/イベントの定型ボイラープレート削減に `gloo`（gloo-render, gloo-events）を併用。
-- `fn main()` をエントリに（trunk の no-modules 構成では `#[wasm_bindgen(start)]` 不要）: canvas 取得 → 入力リスナ登録（**Space/click/tap**。GameOver なら `restart()`、それ以外は `flap()`＝term と同一ルーティング。`keydown` のリピート `event.repeat` は無視）→ requestAnimationFrame ループ開始。Space の `preventDefault` は **passive でないリスナ**（gloo の `EventListenerOptions::enable_prevent_default()`）でないと無視されるので注意。
+- `fn main()` をエントリに（trunk の no-modules 構成では `#[wasm_bindgen(start)]` 不要）: canvas 取得 → 入力リスナ登録（**Space/click/tap**。GameOver なら `restart()`、それ以外は `flap()`＝term と同一ルーティング。`keydown` のリピート `event.repeat` は無視。term はリピートを区別できないため挙動が異なる——§1 の許容差を参照）→ requestAnimationFrame ループ開始。Space の `preventDefault` は **passive でないリスナ**（gloo の `EventListenerOptions::enable_prevent_default()`）でないと無視されるので注意。
 - RAF ループ: 前フレームからの実時間を蓄積し**固定 `DT` 刻みで `tick()`**（§1。1フレーム上限 0.10s）。RAF ハンドルは **drop で停止**するので構造体に保持するか `forget()` する（gloo-events のリスナ保持と同じ作法）。**`visibilitychange` で非表示中はループを止め、復帰時に `acc=0` にリセット（必須）**——長時間バックグラウンド後の復帰一発死を防ぐ（0.10s クランプは描画ヒッチ用の二次的な安全網）。描画は core の状態を canvas に矩形で。1セル=固定 px（例 16px）、canvas = `64*16 × 24*16`、CSS で中央寄せ。**高 DPI** は `image-rendering: pixelated` ＋整数座標描画で滲み回避（`devicePixelRatio` スケールは任意）。色は term と揃える（恐竜風の淡背景＋濃色要素、棒は緑）。
 - 描画ロジックは term と同じ「core グリッドをなぞって塗る」構造（言語も手順も共通）。
 
