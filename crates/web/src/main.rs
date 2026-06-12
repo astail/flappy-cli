@@ -153,13 +153,15 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
             ctx.fill_rect(bx, by, bw, bh);
             ctx.set_stroke_style_str(COLOR_TEXT);
             ctx.stroke_rect(bx, by, bw, bh);
-            // 文言は core の定数（term と同一ソース）。行位置も term のボックス内行に合わせる。
+            // 文言は core の定数（term と同一ソース）。行位置も term のボックス内行に合わせ、
+            // x は枠の中心（キャンバス中心とは 0.5 セルずれる）に揃える。
+            let box_cx = bx + bw / 2.0;
             ctx.set_fill_style_str(COLOR_TEXT);
             ctx.set_font("bold 16px monospace");
-            let _ = ctx.fill_text(GAMEOVER_TITLE, w / 2.0, 3.5 * cell);
+            let _ = ctx.fill_text(GAMEOVER_TITLE, box_cx, 3.5 * cell);
             ctx.set_font("16px monospace");
-            let _ = ctx.fill_text(&format!("SCORE {}", game.score), w / 2.0, 4.5 * cell);
-            let _ = ctx.fill_text(GAMEOVER_RETRY_HINT, w / 2.0, 5.5 * cell);
+            let _ = ctx.fill_text(&format!("SCORE {}", game.score), box_cx, 4.5 * cell);
+            let _ = ctx.fill_text(GAMEOVER_RETRY_HINT, box_cx, 5.5 * cell);
             // 「q : quit」行は term のみ（web に終了概念がないため。DESIGN §2 の許容差）。
         }
         Phase::Playing => {}
