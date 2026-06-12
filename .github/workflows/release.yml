@@ -25,8 +25,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# 既定は最小権限。Release 作成に必要な contents: write は release ジョブのみに付与する。
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,7 +40,7 @@ jobs:
     name: tag と Cargo.toml version の一致を検証
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # workflow_dispatch 起動時は入力された tag をチェックアウトする。
           # tag push 時は inputs.tag が空なので github.ref にフォールバックする。
@@ -91,14 +92,14 @@ jobs:
             os: macos-14
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # workflow_dispatch 起動時は入力された tag をチェックアウトする。
           # tag push 時は inputs.tag が空なので github.ref にフォールバックする。
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Setup Rust toolchain (pinned via rust-toolchain.toml)
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
         with:
           target: ${{ matrix.target }}
 
@@ -144,7 +145,7 @@ jobs:
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
 
       - name: artifact をアップロード
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: flappy-${{ matrix.target }}
           path: |
@@ -157,8 +158,11 @@ jobs:
     name: GitHub Release を作成
     needs: build
     runs-on: ubuntu-latest
+    # GitHub Release の作成（タグ・リリースノート・アセット添付）に contents: write が必要。
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
@@ -183,7 +187,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Release を発行
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           # tag push 起動時は GITHUB_REF から自動解決される。
           # workflow_dispatch のときは入力された tag を使う。
