@@ -250,6 +250,7 @@ pub struct Game {
   }
   ```
 - bin 名は `flappy`（`cargo run -p flappy-term` / インストール後 `flappy`）。
+- **`--help` / `--version`**: `flappy --help`（`-h`）は usage を stdout に表示して即終了、`flappy --version`（`-V`）は `flappy {flappy_core::VERSION}` を表示して即終了。いずれも alternate screen に入らない（CLI の慣習）。`--headless` の `--seed`/`--frames` は値の欠落・不正を silent fallback せず非ゼロ終了（exit 2）。
 
 ---
 
