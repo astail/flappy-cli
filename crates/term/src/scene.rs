@@ -291,23 +291,31 @@ mod tests {
         ('\u{2801}'..='\u{28FF}').contains(&ch)
     }
 
+    /// ゴールデン比較用に version 表示を固定トークンへ置換（version bump のたびの
+    /// ゴールデン手動更新を不要にする）。実 version が描画されること自体は
+    /// version_is_drawn_from_core_const が別途守る。
+    fn mask_version(s: &str) -> String {
+        s.replace(&format!("v{}", flappy_core::VERSION), "vX.Y.Z")
+    }
+
     #[test]
     fn ready_frame_matches_golden() {
         let g = Game::new(Config::default(), 1);
         let scene = scene_to_string(&g);
         assert_eq!(
-            trim_trailing(&scene),
+            mask_version(&trim_trailing(&scene)),
             trim_trailing(include_str!("golden/ready.txt"))
         );
     }
 
     /// ゴールデン再生成用（レイアウト変更時に `cargo test -p flappy-term dump_golden -- --ignored`）。
+    /// version はトークン化して書き出す（ready_frame_matches_golden の mask_version と対）。
     #[test]
     #[ignore]
     fn dump_golden() {
         let g = Game::new(Config::default(), 1);
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/golden/ready.txt");
-        std::fs::write(path, scene_to_string(&g)).unwrap();
+        std::fs::write(path, mask_version(&scene_to_string(&g))).unwrap();
     }
 
     #[test]
