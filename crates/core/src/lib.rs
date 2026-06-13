@@ -559,4 +559,33 @@ mod tests {
         }
         panic!("no seed produced a score to test restart");
     }
+
+    #[test]
+    fn restart_advances_rng_stream() {
+        // restart() は rng を再シードせず既存ストリームを継続する（lib.rs の doc コメント）。
+        // new / restart は spawn_pipe() で 1 draw ずつ消費するため、同じ seed の Rng を
+        // 独立に進めた gap_top 列と一致するはず。再シード実装に変えると 2 本目以降がずれて落ちる。
+        let cfg = Config::default();
+        let (lo, hi) = (1, cfg.rows - 1 - cfg.pipe_gap);
+        let seed = 42u64;
+
+        let mut rng = Rng::new(seed);
+        let expected: Vec<u16> = (0..5).map(|_| rng.gen_range_inclusive(lo, hi)).collect();
+        // 全 draw が偶然同値だと再シードを検出できないため、seed 選定をガードする。
+        assert!(
+            expected.windows(2).any(|w| w[0] != w[1]),
+            "degenerate seed: all draws equal, pick another seed"
+        );
+
+        let mut g = Game::new(Config::default(), seed);
+        let mut actual = vec![g.pipes()[0].gap_top];
+        for _ in 1..expected.len() {
+            g.restart();
+            actual.push(g.pipes()[0].gap_top);
+        }
+        assert_eq!(
+            actual, expected,
+            "restart must continue the rng stream, not re-seed"
+        );
+    }
 }
