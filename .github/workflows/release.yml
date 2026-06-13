@@ -65,8 +65,9 @@ jobs:
             exit 1
           fi
           version="${tag#v}"
-          # version は 3 クレートで手動同期する運用（docs/RELEASE.md）のため、全 Cargo.toml を照合。
-          for toml in crates/core/Cargo.toml crates/term/Cargo.toml crates/web/Cargo.toml; do
+          # version の単一ソースは root [workspace.package]（core/term が継承）と web の 2 箇所
+          # （docs/RELEASE.md）。root を照合すれば継承する core/term の一致も担保される。
+          for toml in Cargo.toml crates/web/Cargo.toml; do
             cargo_version="$(grep -m1 '^version' "${toml}" | sed -E 's/.*"([^"]+)".*/\1/')"
             if [[ "${version}" != "${cargo_version}" ]]; then
               echo "::error::tag (${tag} → ${version}) と ${toml} の version (${cargo_version}) が不一致です"
