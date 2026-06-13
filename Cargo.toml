@@ -4,3 +4,8 @@ members = ["crates/core", "crates/term"]
 # web は wasm 専用で host ビルド不可のため native workspace から除外し、
 # crates/web 側を独立 workspace にする（CI は専用 wasm ジョブで trunk build）。
 exclude = ["crates/web"]
+
+# member（core / term）が version.workspace = true で継承する単一ソース。
+# web は独立 workspace のため継承できず、自身の Cargo.toml で個別に持つ。
+[workspace.package]
+version = "0.5.0"
