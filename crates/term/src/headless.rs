@@ -42,7 +42,7 @@ pub fn run_headless(seed: u64, frames: u32) -> u32 {
         autopilot_step(&mut game);
         game.tick();
     }
-    game.score
+    game.score()
 }
 
 #[cfg(test)]
