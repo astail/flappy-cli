@@ -218,6 +218,9 @@ fn overlay_text(
             // 死亡した鳥は ✕ の文字で表す（render はブロブを描かない）。棒セルの上で
             // 死んだ場合も ✕ が棒色にならないよう paint を BirdDead にする（赤で描く）。
             let (bc, br) = game.bird_cell();
+            // 天井死は bird_cell の row が 0 にクランプされる（core lib.rs の max(0)）。
+            // ✕ が天井ライン/HUD 帯（row 0）を潰さないよう、プレイエリア最上行（row 1）へ寄せる。
+            let br = br.max(1);
             if (br as usize) < rows as usize && bc < cols {
                 chars[br as usize][bc as usize] = BIRD_DEAD;
                 paint[br as usize][bc as usize] = Paint::BirdDead;
@@ -433,6 +436,36 @@ mod tests {
         assert!(
             frame.paint.iter().flatten().any(|p| *p == Paint::BirdDead),
             "dead bird cell should be tagged Paint::BirdDead"
+        );
+    }
+
+    #[test]
+    fn ceiling_death_marker_clamps_to_play_area_top() {
+        // 連打で上昇 → 天井死。死亡マーカー（✕）は天井ライン/HUD 帯（row 0）ではなく
+        // プレイエリア最上行（row 1）に出ること（issue #112: term/web で一致）。
+        let mut g = Game::new(Config::default(), 1);
+        for _ in 0..300 {
+            g.flap();
+            g.tick();
+            if g.phase() == Phase::GameOver {
+                break;
+            }
+        }
+        assert_eq!(g.phase(), Phase::GameOver);
+        // 天井死の証跡: bird_cell の row は max(0) で 0 にクランプされる。
+        assert_eq!(
+            g.bird_cell().1,
+            0,
+            "ceiling death clamps bird_cell row to 0"
+        );
+        let frame = render(&g);
+        assert!(
+            !frame.chars[0].contains(&BIRD_DEAD),
+            "death marker must not land on row 0 (ceiling line / HUD)"
+        );
+        assert!(
+            frame.chars[1].contains(&BIRD_DEAD),
+            "death marker must be clamped to play area top (row 1)"
         );
     }
 

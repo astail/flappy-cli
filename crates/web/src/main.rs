@@ -104,7 +104,9 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     let cx = (cfg.bird_col as f64 + 0.5) * cell;
     let dead = game.phase() == Phase::GameOver;
     let cy = if dead {
-        (game.bird_cell().1 as f64 + 0.5) * cell
+        // 天井死は bird_cell の row が 0 にクランプされる（core の max(0)）。赤丸が HUD 帯
+        // （row 0）を潰さないよう、プレイエリア最上行（row 1）へ寄せる（term の ✕ と一致）。
+        (game.bird_cell().1.max(1) as f64 + 0.5) * cell
     } else {
         let qy = (game.bird_y() * 4.0).round() / 4.0;
         (qy as f64 + 0.5) * cell
