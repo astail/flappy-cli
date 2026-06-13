@@ -6,7 +6,9 @@
 //! 判定（core の占有述語）と描画が同じセル定義を共有しつつ、ゴールデンテストが ANSI に汚されず
 //! 安定する。
 
-use flappy_core::{pipe_blocks_row, Game, Phase, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE};
+use flappy_core::{
+    pipe_blocks_row, Game, Phase, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT, READY_TITLE,
+};
 
 const BIRD_DEAD: char = '✕';
 const GROUND: char = '─';
@@ -210,8 +212,8 @@ fn overlay_text(
     // メッセージのオーバーレイ。
     match game.phase() {
         Phase::Ready => {
-            place_centered(&mut chars[3], &mut paint[3], "F L A P P Y", cols);
-            place_centered(&mut chars[8], &mut paint[8], "──  press SPACE  ──", cols);
+            place_centered(&mut chars[3], &mut paint[3], READY_TITLE, cols);
+            place_centered(&mut chars[8], &mut paint[8], READY_HINT, cols);
         }
         Phase::GameOver => {
             draw_gameover_box(chars, paint, cols, game.score());

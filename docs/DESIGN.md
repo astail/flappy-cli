@@ -195,7 +195,7 @@ pub struct Game {
 - `restart(&mut self)` — best を保持して初期化
 - 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `bird_y() -> f32`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は衝突と同じ round 済み行（判定と描画の一致用）、`bird_y()` はサブセル描画用の連続座標、という役割分担。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
 - `pipe_blocks_row(gap_top, pipe_gap, rows, row) -> bool` — 棒がその行を占有するかの純粋述語。**判定と描画が共有する唯一の占有定義**（§3 冒頭の「描画と判定の乖離防止」の実体）
-- 共有定数: `DT`（固定ステップ）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言。term/web で文言を共有）
+- 共有定数: `DT`（固定ステップ）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言）, `READY_TITLE` / `READY_HINT`（Ready 画面文言）。画面文言は term/web で共有し文言ズレを防ぐ（行位置の数値は表現系が異なるため各レンダラが持つ）
 - 初期化（new / restart）: `bird_y` は画面中央付近。最初の棒を `x = cols`（右端）に1本だけ生成し、`dist_to_next = pipe_spacing` から開始（1本目が鳥に届くまで約 `cols - bird_col` 列 ≈ 1画面ぶんの助走になり、開始即死を防ぐ）
 
 ### tick の中身（処理順）
