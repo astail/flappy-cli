@@ -453,7 +453,11 @@ mod tests {
         }
         assert_eq!(g.phase(), Phase::GameOver);
         // 天井死の証跡: bird_cell の row は max(0) で 0 にクランプされる。
-        assert_eq!(g.bird_cell().1, 0, "ceiling death clamps bird_cell row to 0");
+        assert_eq!(
+            g.bird_cell().1,
+            0,
+            "ceiling death clamps bird_cell row to 0"
+        );
         let frame = render(&g);
         assert!(
             !frame.chars[0].contains(&BIRD_DEAD),
