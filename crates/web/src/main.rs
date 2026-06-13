@@ -121,9 +121,9 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.set_text_baseline("middle");
     let hud_y = cell * 0.5;
     ctx.set_text_align("left");
-    let _ = ctx.fill_text(&format!("SCORE {}", game.score), cell, hud_y);
+    let _ = ctx.fill_text(&format!("SCORE {}", game.score()), cell, hud_y);
     ctx.set_text_align("right");
-    let _ = ctx.fill_text(&format!("BEST {}", game.best), w - cell, hud_y);
+    let _ = ctx.fill_text(&format!("BEST {}", game.best()), w - cell, hud_y);
 
     // version（地面ライン右端に控えめに）。term の scene と同じ右下配置・単一ソース。
     ctx.set_font("12px monospace");
@@ -160,7 +160,7 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
             ctx.set_font("bold 16px monospace");
             let _ = ctx.fill_text(GAMEOVER_TITLE, box_cx, 3.5 * cell);
             ctx.set_font("16px monospace");
-            let _ = ctx.fill_text(&format!("SCORE {}", game.score), box_cx, 4.5 * cell);
+            let _ = ctx.fill_text(&format!("SCORE {}", game.score()), box_cx, 4.5 * cell);
             let _ = ctx.fill_text(GAMEOVER_RETRY_HINT, box_cx, 5.5 * cell);
             // 「q : quit」行は term のみ（web に終了概念がないため。DESIGN §2 の許容差）。
         }

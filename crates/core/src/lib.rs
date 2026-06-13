@@ -88,8 +88,8 @@ pub struct Game {
     pipes: Vec<Pipe>,
     /// 次の棒生成までの距離
     dist_to_next: f32,
-    pub score: u32,
-    pub best: u32,
+    score: u32,
+    best: u32,
 }
 
 impl Game {
@@ -158,6 +158,16 @@ impl Game {
     /// 描画に必要なグリッド寸法・パラメータ（cols/rows/pipe_gap 等）を参照する。
     pub fn config(&self) -> &Config {
         &self.cfg
+    }
+
+    /// 現在スコア。加点は tick 内でのみ行われ、外部からは読み取り専用。
+    pub fn score(&self) -> u32 {
+        self.score
+    }
+
+    /// 最高スコア。tick の加点に追従して更新され、外部からは読み取り専用。
+    pub fn best(&self) -> u32 {
+        self.best
     }
 
     /// 鳥の離散行（`bird_y.round()`）。衝突判定と描画で同一の丸めを使うための単一ソース。
@@ -266,8 +276,8 @@ mod tests {
     fn new_starts_in_ready() {
         let g = Game::new(Config::default(), 1);
         assert_eq!(g.phase(), Phase::Ready);
-        assert_eq!(g.score, 0);
-        assert_eq!(g.best, 0);
+        assert_eq!(g.score(), 0);
+        assert_eq!(g.best(), 0);
     }
 
     #[test]
@@ -487,9 +497,9 @@ mod tests {
                     g.flap();
                 }
                 g.tick();
-                if g.score > 0 {
-                    assert_eq!(g.score, 1, "first scoring event must be exactly 1");
-                    assert_eq!(g.best, 1, "best must track the first score");
+                if g.score() > 0 {
+                    assert_eq!(g.score(), 1, "first scoring event must be exactly 1");
+                    assert_eq!(g.best(), 1, "best must track the first score");
                     return;
                 }
                 if g.phase() == Phase::GameOver {
@@ -513,14 +523,14 @@ mod tests {
                     g.flap();
                 }
                 g.tick();
-                assert!(g.score >= prev, "score must be monotonic non-decreasing");
-                assert_eq!(g.best, g.score, "best must track score while climbing");
-                prev = g.score;
+                assert!(g.score() >= prev, "score must be monotonic non-decreasing");
+                assert_eq!(g.best(), g.score(), "best must track score while climbing");
+                prev = g.score();
                 if g.phase() == Phase::GameOver {
                     break;
                 }
             }
-            if g.score >= 2 {
+            if g.score() >= 2 {
                 return; // 複数棒通過でスコア加算を確認
             }
         }
@@ -544,12 +554,12 @@ mod tests {
                     break;
                 }
             }
-            if g.score >= 1 {
-                let best = g.best;
+            if g.score() >= 1 {
+                let best = g.best();
                 g.restart();
                 assert_eq!(g.phase(), Phase::Ready);
-                assert_eq!(g.score, 0);
-                assert_eq!(g.best, best, "best must be preserved across restart");
+                assert_eq!(g.score(), 0);
+                assert_eq!(g.best(), best, "best must be preserved across restart");
                 assert_eq!(g.pipes().len(), 1);
                 assert_eq!(g.pipes()[0].x, cols as f32);
                 assert_eq!(g.dist_to_next, spacing);

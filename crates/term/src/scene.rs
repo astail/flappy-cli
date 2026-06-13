@@ -190,9 +190,9 @@ fn overlay_text(
         *cell = GROUND;
         *p = Paint::None;
     }
-    let score_text = format!("SCORE {}", game.score);
+    let score_text = format!("SCORE {}", game.score());
     place_at(&mut chars[0], &mut paint[0], &score_text, 1);
-    let best_text = format!("BEST {}", game.best);
+    let best_text = format!("BEST {}", game.best());
     let best_start = cols_u.saturating_sub(best_text.chars().count() + 1);
     place_at(&mut chars[0], &mut paint[0], &best_text, best_start);
 
@@ -214,7 +214,7 @@ fn overlay_text(
             place_centered(&mut chars[8], &mut paint[8], "──  press SPACE  ──", cols);
         }
         Phase::GameOver => {
-            draw_gameover_box(chars, paint, cols, game.score);
+            draw_gameover_box(chars, paint, cols, game.score());
             // 死亡した鳥は ✕ の文字で表す（render はブロブを描かない）。棒セルの上で
             // 死んだ場合も ✕ が棒色にならないよう paint を BirdDead にする（赤で描く）。
             let (bc, br) = game.bird_cell();
