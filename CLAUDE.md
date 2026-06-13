@@ -74,7 +74,7 @@
 
 **主なコマンド**:
 - ターミナル実行: `cargo run -p flappy-term`
-- テスト: `cargo test -p flappy-core`
+- テスト: `cargo test --workspace`（core のみ速く回す場合は `cargo test -p flappy-core`）
 - ブラウザ開発: `cd crates/web && trunk serve`（初回のみ `rustup target add wasm32-unknown-unknown` と `cargo install trunk`）
 - ブラウザ配信ビルド: `cd crates/web && trunk build --release --public-url /flappy-cli/`
 
