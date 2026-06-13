@@ -56,7 +56,8 @@ flappy-cli/
 | Ready | SPACE / クリック・タップ | ゲーム開始（→Playing、初回フラップ込み） |
 | Playing | SPACE / クリック・タップ | フラップ（上昇） |
 | Playing | （放置） | 重力で落下し続ける |
-| GameOver | SPACE / r / クリック | リスタート（→Ready） |
+| GameOver | SPACE / クリック | リスタート（→Ready） |
+| 全状態 | r | リスタート（→Ready。phase 非依存、term/web 共通） |
 | 全状態 | q / Esc（term のみ） | 終了 |
 
 web の Space は `preventDefault` でページスクロールを抑止する。
@@ -74,7 +75,7 @@ loop {
     t = now();  acc += min(t - last, 0.10);  last = t   // 実時間を蓄積。1フレーム上限 0.10s=6tick（超過分は捨てる＝処理が遅れたら物理がスロー化し spiral of death を防止。無操作落下も最大~3行に制限）
     for ev in poll_input() {              // 非ブロッキング入力
         Space/Click => if phase == GameOver { game.restart() } else { game.flap() }
-        R           => game.restart()      //   GameOver のショートカット（term）
+        R           => game.restart()      //   全 phase で即リスタート（term/web 共通）
         Q/Esc       => quit                //   term のみ
     }
     while acc >= DT { game.tick(); acc -= DT }     // 固定ステップで物理更新（tick は内部で DT を使う。Playing 時のみ）
@@ -231,7 +232,7 @@ pub struct Game {
 
 - 起動時: alternate screen 入場 + raw mode + カーソル非表示 + **mouse capture 有効化**（クリック入力を取るため。実行中は端末のテキスト選択・コピーが効かなくなるが、クリック操作を受ける以上必要な**意図的な許容差**）。crossterm 0.29 に raw mode の RAII は無いので**自前の `Drop` ガード**で復帰させ、加えて **panic hook**（まず端末復帰 → 既定 hook）を仕込んで panic 時の端末破壊を防ぐ。**`panic = "abort"` を設定しない**（Drop が走らなくなる）。
 - ゲームループ: 描画は ~30–60Hz、**物理は固定 60Hz**（§1 の蓄積ループ。1 描画あたり 1–2 tick）。`event::poll(timeout)` で非ブロッキング入力 →
-  - **Space / クリック**: GameOver なら `restart()`、それ以外は `flap()` / **r**: `restart()`（GameOver のショートカット）/ **q・Esc**: 終了
+  - **Space / クリック**: GameOver なら `restart()`、それ以外は `flap()` / **r**: `restart()`（全 phase で即リスタート）/ **q・Esc**: 終了
 - 各フレーム: 経過実時間を蓄積し固定 `DT` 刻みで `tick()` を呼ぶ → グリッド（`Vec<char>` か `String`）を組み立て、カーソルを左上に戻して一括描画。
   - 鳥 `●`、棒 `█`（緑）、地面ライン、上部にスコア/ベスト、Ready/GameOver のメッセージ。
 - グリッドはターミナル幅未満ならセンタリング（レターボックス）。64×24 未満ならプレイを止めてリサイズを促す（§2）。`Event::Resize` は次フレームで再センタリングのみ。
