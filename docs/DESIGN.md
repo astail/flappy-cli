@@ -88,7 +88,7 @@ loop {
 
 ## 2. 画面レイアウト
 
-論理グリッドは **64列 × 24行**（両プラットフォーム共通＝同じ画面）。下記は縮小イメージ（_not to scale_。鳥は実際は col 12、実座標は §3 座標系 / §7 を参照）。図中の `●` / `█` は概念表現で、実際の動く要素（鳥・棒）は Braille サブセル（1 セル = 横2×縦4 ドット）で滑らかに描画される（§4 参照）。
+論理グリッドは **64列 × 24行**（両プラットフォーム共通＝同じ画面）。下記は縮小イメージ（_not to scale_。鳥は実際は col 12、実座標は §3 座標系 / §7 を参照）。図中の `█` は概念表現で、棒は実際には Braille サブセル（1 セル = 横2×縦4 ドット）で滑らかに描画される（§4 参照）。鳥は図のとおり `●` の 1 文字（term/web 共通）。
 最上行を HUD（SCORE / BEST）、最下行付近を地面ラインにし、中央の広い帯がプレイエリア。
 
 ### Ready（開始前）
@@ -144,7 +144,7 @@ loop {
 
 | 要素 | term（文字） | web（canvas） |
 |---|---|---|
-| 鳥 | Braille サブセルの 2×2 ドットブロブ（GameOver 時は `✕`・赤） | 塗り円（GameOver 時は赤） |
+| 鳥 | `●` の 1 文字（bird_cell() の round 行・GameOver 時は `✕`・赤） | 塗り円（同じ round 行・GameOver 時は赤） |
 | 棒 | Braille サブセル（緑、横 1/2 セル刻み） | 緑の矩形（同じ 1/2 セル刻み） |
 | 地面ライン | `─` の横帯（最下行） | 同位置の横帯 |
 | HUD（SCORE/BEST） | 最上行テキスト | 上部テキスト |
@@ -193,7 +193,7 @@ pub struct Game {
 - `flap(&mut self)` — Ready なら Playing 化、Playing なら `bird_vy = flap_impulse`
 - `tick(&mut self)` — Playing 時のみ物理更新（後述）。**内部で固定 `DT = 1/60` を進める**（可変 dt は受け取らない＝決定論を型で強制。実 dt の揺れは物理に入らずプラットフォーム非依存）。core は `pub const DT: f32 = 1.0 / 60.0;` を公開し、レンダラ側がアキュムレータで `tick()` の呼び出し回数を制御する（§1）
 - `restart(&mut self)` — best を保持して初期化
-- 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `bird_y() -> f32`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は衝突と同じ round 済み行（判定と描画の一致用）、`bird_y()` はサブセル描画用の連続座標、という役割分担。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
+- 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は衝突と同じ round 済み行で、鳥の描画行もこれに揃える（判定と描画の一致用）。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
 - `pipe_blocks_row(gap_top, pipe_gap, rows, row) -> bool` — 棒がその行を占有するかの純粋述語。**判定と描画が共有する唯一の占有定義**（§3 冒頭の「描画と判定の乖離防止」の実体）
 - 共有定数: `DT`（固定ステップ）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言）, `READY_TITLE` / `READY_HINT`（Ready 画面文言）。画面文言は term/web で共有し文言ズレを防ぐ（行位置の数値は表現系が異なるため各レンダラが持つ）
 - 初期化（new / restart）: `bird_y` は画面中央付近。最初の棒を `x = cols`（右端）に1本だけ生成し、`dist_to_next = pipe_spacing` から開始（1本目が鳥に届くまで約 `cols - bird_col` 列 ≈ 1画面ぶんの助走になり、開始即死を防ぐ）
@@ -236,7 +236,7 @@ pub struct Game {
 - ゲームループ: 描画は ~30–60Hz、**物理は固定 60Hz**（§1 の蓄積ループ。1 描画あたり 1–2 tick）。`event::poll(timeout)` で非ブロッキング入力 →
   - **Space / クリック**: GameOver なら `restart()`、それ以外は `flap()` / **r**: `restart()`（全 phase で即リスタート）/ **q・Esc**: 終了
 - 各フレーム: 経過実時間を蓄積し固定 `DT` 刻みで `tick()` を呼ぶ → グリッド（`Vec<char>` か `String`）を組み立て、カーソルを左上に戻して一括描画。
-  - 鳥と棒は Braille サブセル描画（1 セル = 横2×縦4 ドット。鳥は 2×2 ドットブロブ、死亡時のみ `✕`・赤。棒は緑）、地面ライン、上部にスコア/ベスト、Ready/GameOver のメッセージ。
+  - 棒は Braille サブセル描画（1 セル = 横2×縦4 ドット、緑）。鳥は `●` の 1 文字（bird_cell() の round 行・死亡時のみ `✕`・赤）。加えて地面ライン、上部にスコア/ベスト、Ready/GameOver のメッセージ。
 - グリッドはターミナル幅未満ならセンタリング（レターボックス）。64×24 未満ならプレイを止めてリサイズを促す（§2）。`Event::Resize` は次フレームで再センタリングのみ。
 - **headless モード** `flappy --headless --seed S --frames N`: TTY 不要・端末ガード非経由で、**決定論的な autopilot**（下記の一意規則で隙間を追従）＋**固定 DT** で N フレーム自動実行し最終スコアを stdout 出力。CI は **(a) 同一 seed の 2 回走でスコア一致**（決定論の回帰検出）と **(b) スコアが既知のゴールデン値（非ゼロ）** を assert する（ゴールデン値は実装後に実測して埋める）。autopilot 規則は実装非依存に一意化する:
 
