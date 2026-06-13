@@ -6,6 +6,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # runner 障害など一過性失敗時に Actions UI から手動再実行できるようにする。
+  workflow_dispatch:
 
 # 同一 ref の進行中 run はキャンセルして無駄 run を削る。
 concurrency:
