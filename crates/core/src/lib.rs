@@ -19,6 +19,12 @@ pub const GAMEOVER_TITLE: &str = "GAME  OVER";
 /// GameOver 画面の retry 案内（SPACE / click は term・web 共通の主操作）。
 pub const GAMEOVER_RETRY_HINT: &str = "SPACE / click / r : retry";
 
+/// Ready 画面のタイトル（#107: GameOver 文言と同様 term/web が同一ソースを参照し文言ズレを防ぐ）。
+pub const READY_TITLE: &str = "F L A P P Y";
+
+/// Ready 画面の開始案内（行位置は表現系が異なるため各レンダラ側が持つ）。
+pub const READY_HINT: &str = "──  press SPACE  ──";
+
 /// チューニング値の集約。デフォルトは DESIGN §7 の初期値。
 pub struct Config {
     pub cols: u16,

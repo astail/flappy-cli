@@ -14,7 +14,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use flappy_core::{
-    pipe_blocks_row, Config, Game, Phase, DT, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, VERSION,
+    pipe_blocks_row, Config, Game, Phase, DT, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT,
+    READY_TITLE, VERSION,
 };
 use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
@@ -140,9 +141,9 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     match game.phase() {
         Phase::Ready => {
             ctx.set_font("bold 32px monospace");
-            let _ = ctx.fill_text("F L A P P Y", w / 2.0, 3.5 * cell);
+            let _ = ctx.fill_text(READY_TITLE, w / 2.0, 3.5 * cell);
             ctx.set_font("16px monospace");
-            let _ = ctx.fill_text("──  press SPACE  ──", w / 2.0, 8.5 * cell);
+            let _ = ctx.fill_text(READY_HINT, w / 2.0, 8.5 * cell);
         }
         Phase::GameOver => {
             // 罫線ボックス相当の枠（#76: term の draw_gameover_box と同じ行・同じ幅）。
