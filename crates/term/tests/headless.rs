@@ -69,3 +69,18 @@ fn invalid_headless_value_exits_nonzero() {
         assert!(stderr.contains("不正"), "{args:?} stderr: {stderr:?}");
     }
 }
+
+/// 値なしフラグ（末尾の `--seed` など）も silent fallback せず非ゼロ終了する。
+#[test]
+fn missing_headless_value_exits_nonzero() {
+    let out = Command::new(env!("CARGO_BIN_EXE_flappy"))
+        .args(["--headless", "--seed"])
+        .output()
+        .expect("failed to run flappy");
+    assert!(
+        !out.status.success(),
+        "--seed (no value) should exit non-zero"
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("値が必要"), "stderr: {stderr:?}");
+}

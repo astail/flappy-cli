@@ -134,12 +134,6 @@ fn seed_from_clock() -> u64 {
         .unwrap_or(0)
 }
 
-/// `args` から `flag` の次トークンを取り出す（`--seed 1` の `1`）。
-fn arg_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
-    let i = args.iter().position(|a| a == flag)?;
-    args.get(i + 1).map(String::as_str)
-}
-
 const USAGE: &str = "flappy - ターミナルで遊ぶ Flappy Bird 風ドットゲーム
 
 USAGE:
@@ -150,15 +144,20 @@ USAGE:
     flappy -h, --help                        このヘルプを表示
     flappy -V, --version                     バージョンを表示";
 
-/// `flag` の値を parse する。値が不正なら usage 誘導つきで非ゼロ終了（silent fallback しない）。
+/// `flag` の値を parse する。`flag` 省略時は `default`。値の欠落・不正は usage 誘導つきで
+/// 非ゼロ終了（silent fallback しない）。
 fn parse_flag_or_exit<T: std::str::FromStr>(args: &[String], flag: &str, default: T) -> T {
-    match arg_value(args, flag) {
-        None => default,
-        Some(s) => s.parse().unwrap_or_else(|_| {
-            eprintln!("error: {flag} の値が不正です: {s:?}（--help 参照）");
-            std::process::exit(2);
-        }),
-    }
+    let Some(pos) = args.iter().position(|a| a == flag) else {
+        return default;
+    };
+    let Some(s) = args.get(pos + 1) else {
+        eprintln!("error: {flag} には値が必要です（--help 参照）");
+        std::process::exit(2);
+    };
+    s.parse().unwrap_or_else(|_| {
+        eprintln!("error: {flag} の値が不正です: {s:?}（--help 参照）");
+        std::process::exit(2);
+    })
 }
 
 fn main() -> io::Result<()> {
