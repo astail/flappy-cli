@@ -126,6 +126,10 @@ flappy-cli --headless --frames 1      # → 数値
 - [ ] `astail/homebrew-tap` の `Formula/flappy-cli.rb`（version / url / sha256）を更新
 - [ ] `brew install` / `brew test` が通る
 
+## dependabot 対象外の手動追従
+
+dependabot は `taiki-e/install-action` の action 本体（SHA/version）は追従するが、`tool: trunk@X.Y.Z` で固定する trunk 本体（`.github/workflows/ci.yml` / `pages.yml` の 2 箇所）と `rust-toolchain.toml` の `channel` は対象外。リリース時（または定期的に）[trunk releases](https://github.com/trunk-rs/trunk/releases) と [Rust リリース](https://forge.rust-lang.org/) で最新 stable を手動確認して更新する。
+
 ## スコープ外（別 issue）
 
 `.deb` / `.rpm` / crates.io 公開、Homebrew formula の自動 bump。
