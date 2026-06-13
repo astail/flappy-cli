@@ -140,16 +140,44 @@ fn arg_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.get(i + 1).map(String::as_str)
 }
 
+const USAGE: &str = "flappy - ターミナルで遊ぶ Flappy Bird 風ドットゲーム
+
+USAGE:
+    flappy                                   TUI でプレイ
+    flappy --headless [--seed S] [--frames N]
+                                             決定論 autopilot で N フレーム実行し
+                                             最終スコアを stdout に出力（既定 S=1, N=600）
+    flappy -h, --help                        このヘルプを表示
+    flappy -V, --version                     バージョンを表示";
+
+/// `flag` の値を parse する。値が不正なら usage 誘導つきで非ゼロ終了（silent fallback しない）。
+fn parse_flag_or_exit<T: std::str::FromStr>(args: &[String], flag: &str, default: T) -> T {
+    match arg_value(args, flag) {
+        None => default,
+        Some(s) => s.parse().unwrap_or_else(|_| {
+            eprintln!("error: {flag} の値が不正です: {s:?}（--help 参照）");
+            std::process::exit(2);
+        }),
+    }
+}
+
 fn main() -> io::Result<()> {
-    // headless モード: TTY 不要・端末ガード非経由で N フレーム自動実行しスコアを stdout 出力。
     let args: Vec<String> = std::env::args().collect();
+
+    // --help / --version は TUI（alternate screen）に入らず即終了する（CLI の慣習）。
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("flappy {}", flappy_core::VERSION);
+        return Ok(());
+    }
+
+    // headless モード: TTY 不要・端末ガード非経由で N フレーム自動実行しスコアを stdout 出力。
     if args.iter().any(|a| a == "--headless") {
-        let seed = arg_value(&args, "--seed")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1);
-        let frames = arg_value(&args, "--frames")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(600);
+        let seed = parse_flag_or_exit(&args, "--seed", 1);
+        let frames = parse_flag_or_exit(&args, "--frames", 600);
         println!("{}", headless::run_headless(seed, frames));
         return Ok(());
     }
