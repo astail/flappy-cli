@@ -10,6 +10,7 @@ use flappy_core::{
     pipe_blocks_row, Game, Phase, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT, READY_TITLE,
 };
 
+const BIRD: char = '●';
 const BIRD_DEAD: char = '✕';
 const GROUND: char = '─';
 
@@ -89,9 +90,9 @@ pub fn render(game: &Game) -> Frame {
     let cfg = game.config();
     let (cols, rows) = (cfg.cols as usize, cfg.rows as usize);
 
-    // ドットビットマップ（rows*4 × cols*2）。動く要素をここに点で打つ。
-    let (dot_w, dot_h) = (cols * 2, rows * 4);
-    let mut dots = vec![vec![false; dot_w]; dot_h];
+    // ドットビットマップ（rows*4 × cols*2）。動く要素（棒）をここに点で打つ。
+    let dot_w = cols * 2;
+    let mut dots = vec![vec![false; dot_w]; rows * 4];
 
     // 棒: dot-x = round(x*2) から幅 2 ドット（=1 セル幅）。塞ぐセル行の dot-y 4 本を立てる。
     // 横は dot 解像度（既知の制約: 衝突は round(p.x) の 1 セルで判定されるため視覚との差は
@@ -113,24 +114,8 @@ pub fn render(game: &Game) -> Frame {
         }
     }
 
-    // 鳥: dot-x = bird_col*2 から幅 2 ドット、dot-y 中心から縦 2 ドットのブロブ。
-    // 縦は dot 解像度（既知の制約: 衝突は bird_cell() の round 行で判定されるため、視覚位置と
-    // 衝突行は最大 0.5 セルずれうる。視覚は真の f32 位置に忠実）。
-    // GameOver は ✕ を文字で出すためブロブは描かない（overlay_text 参照）。
-    if game.phase() != Phase::GameOver {
-        let bird_dx0 = (cfg.bird_col * 2.0).round() as i32;
-        let bird_dy_center = (game.bird_y() * 4.0).round() as i32;
-        for dx in [bird_dx0, bird_dx0 + 1] {
-            if dx < 0 || dx as usize >= dot_w {
-                continue;
-            }
-            for dy in [bird_dy_center, bird_dy_center + 1] {
-                if dy >= 0 && (dy as usize) < dot_h {
-                    dots[dy as usize][dx as usize] = true;
-                }
-            }
-        }
-    }
+    // 鳥は Braille ブロブではなく ● の 1 文字で描く（overlay_text 参照。web の塗り円と
+    // 見た目を揃える。GameOver の ✕ も同様に文字で描く）。
 
     // ドットを 2×4 ブロックごとに Braille へパック。立っているセルに塗り分けを付ける。
     let mut chars = vec![vec![' '; cols]; rows];
@@ -147,8 +132,8 @@ pub fn render(game: &Game) -> Frame {
             }
             chars[r][c] = braille(mask);
             if mask != 0 {
-                // 鳥セルは鳥列・鳥行帯のとき Bird、それ以外（立っている＝棒）は Pipe。
-                paint[r][c] = paint_for_cell(game, r, c);
+                // dots に立つのは棒だけ（鳥は overlay_text で ● 描画）なので常に Pipe。
+                paint[r][c] = Paint::Pipe;
             }
         }
     }
@@ -157,24 +142,6 @@ pub fn render(game: &Game) -> Frame {
     overlay_text(game, &mut chars, &mut paint, cfg.cols, cfg.rows);
 
     Frame { chars, paint }
-}
-
-/// 立っているセルの塗り分けを決める。鳥セル（鳥列かつ鳥の縦 2 ドット帯に重なる行）は Bird、
-/// それ以外は Pipe。GameOver はブロブを描かないため常に Pipe。
-fn paint_for_cell(game: &Game, r: usize, c: usize) -> Paint {
-    if game.phase() == Phase::GameOver {
-        return Paint::Pipe;
-    }
-    let cfg = game.config();
-    let bird_c = cfg.bird_col.round() as i32;
-    let bird_dy_center = (game.bird_y() * 4.0).round() as i32;
-    // 鳥ブロブが占める行（dy_center と dy_center+1 が属するセル行）。
-    let bird_rows = [bird_dy_center / 4, (bird_dy_center + 1) / 4];
-    if c as i32 == bird_c && bird_rows.contains(&(r as i32)) {
-        Paint::Bird
-    } else {
-        Paint::Pipe
-    }
 }
 
 /// テキストレイヤー（天井・地面ライン / HUD / メッセージ / GameOver ボックス / 死亡鳥）を上書きする。
@@ -229,6 +196,18 @@ fn overlay_text(
             }
         }
         Phase::Playing => {}
+    }
+
+    // 生存中の鳥は ● の 1 文字で描く（render はブロブを描かない。web の塗り円と見た目を揃える）。
+    // 行は bird_cell()（衝突と同じ round 行）。死亡 ✕ と同様、天井死クランプ等で row 0 に来ても
+    // 天井ライン/HUD 帯を潰さないよう row 1 以上へ寄せる。
+    if game.phase() != Phase::GameOver {
+        let (bc, br) = game.bird_cell();
+        let br = br.max(1);
+        if (br as usize) < rows as usize && bc < cols {
+            chars[br as usize][bc as usize] = BIRD;
+            paint[br as usize][bc as usize] = Paint::Bird;
+        }
     }
 }
 
@@ -291,11 +270,6 @@ mod tests {
             .join("\n")
     }
 
-    /// Braille 範囲（U+2800..=U+28FF）の非空グリフか。
-    fn is_braille(ch: char) -> bool {
-        ('\u{2801}'..='\u{28FF}').contains(&ch)
-    }
-
     /// ゴールデン比較用に version 表示を固定トークンへ置換（version bump のたびの
     /// ゴールデン手動更新を不要にする）。実 version が描画されること自体は
     /// version_is_drawn_from_core_const が別途守る。
@@ -336,12 +310,9 @@ mod tests {
             ls[0].contains('─'),
             "ceiling line should render as ─ on row 0"
         );
-        // 鳥は col 12・bird_y=12.0 → dot-y 中心 48 → 48/4=12 行目。Braille グリフで描かれる。
+        // 鳥は col 12・bird_y=12.0 → bird_cell row 12。● の 1 文字で描かれる。
         let bird = ls[12].chars().nth(12).unwrap();
-        assert!(
-            is_braille(bird),
-            "bird cell should be a non-empty Braille glyph, got {bird:?}"
-        );
+        assert_eq!(bird, BIRD, "bird cell should render as ●, got {bird:?}");
         // 地面ラインは ─ 基調で、右端に version を重ねる。
         assert!(ls[23].starts_with(&"─".repeat(40)));
         assert!(ls[23].contains(&format!("v{}", flappy_core::VERSION)));
@@ -370,7 +341,7 @@ mod tests {
         assert!(!scene.contains("F L A P P Y"));
         // 1 tick も進めていないので鳥は bird_y=12.0 のまま row 12 col 12。
         let bird = lines(&scene)[12].chars().nth(12).unwrap();
-        assert!(is_braille(bird), "bird should remain a Braille glyph");
+        assert_eq!(bird, BIRD, "bird should remain a ● glyph while playing");
     }
 
     #[test]
@@ -481,31 +452,26 @@ mod tests {
     }
 
     #[test]
-    fn bird_subcell_glyph_changes_as_bird_drifts() {
-        // bird_y の端数（縦ドット位置）が変わると同じ行内でも Braille グリフが変わる
-        // ＝サブセル化の本質。flap の上昇〜重力で戻る間、鳥が row 12 帯に居るうちの
-        // グリフを集める。
+    fn bird_renders_as_single_circle_while_drifting() {
+        // 生存中の鳥は常に ● の 1 文字（= 1 つの円）。上昇〜落下で行が変わっても、
+        // 鳥セルは bird_cell() の round 行 col 12 に 1 つだけ ● が出る（複数ドットにならない）。
         let mut g = Game::new(Config::default(), 1);
-        g.flap(); // 上向き初速で上昇開始（その後重力で減速し row 12 帯へ戻る）。
-        let mut glyphs = std::collections::HashSet::new();
-        // 初期状態（bird_y=12.0）。
-        glyphs.insert(render(&g).chars[12][12]);
+        g.flap();
         for _ in 0..30 {
             g.tick();
-            // 鳥がまだ row 12 にいる間だけ収集（離れたら端数比較にならない）。
-            if g.bird_cell().1 == 12 {
-                glyphs.insert(render(&g).chars[12][12]);
+            if g.phase() != Phase::Playing {
+                break;
             }
+            let frame = render(&g);
+            let row = g.bird_cell().1.max(1) as usize;
+            assert_eq!(
+                frame.chars[row][12], BIRD,
+                "bird should render as a single ●"
+            );
+            // 鳥は ● ちょうど 1 つ（旧ブロブのような 4 ドットにならない）。
+            let bird_count = frame.chars.iter().flatten().filter(|&&c| c == BIRD).count();
+            assert_eq!(bird_count, 1, "exactly one ● should be drawn");
         }
-        glyphs.remove(&' ');
-        assert!(
-            glyphs.iter().all(|&c| is_braille(c)),
-            "all bird glyphs in row 12 should be Braille"
-        );
-        assert!(
-            glyphs.len() >= 2,
-            "sub-cell drift within a row should yield >= 2 distinct glyphs, got {glyphs:?}"
-        );
     }
 
     #[test]
