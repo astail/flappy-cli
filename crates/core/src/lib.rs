@@ -10,6 +10,10 @@ use rng::Rng;
 /// 物理の固定タイムステップ（秒）。レンダラはアキュムレータで `tick()` 回数を制御する。
 pub const DT: f32 = 1.0 / 60.0;
 
+/// 1 フレームで消化する実時間の上限（秒）。描画ヒッチやタブ復帰で溜まった実時間を
+/// 一気に tick して即死/カクつく「spiral of death」を防ぐ安全網。[`Accumulator`] が内蔵する。
+pub const MAX_FRAME_DT: f32 = 0.10;
+
 /// ビルド時の version（= Cargo.toml の version）。term/web の画面描画（#40）で参照する。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -24,6 +28,34 @@ pub const READY_TITLE: &str = "F L A P P Y";
 
 /// Ready 画面の開始案内（行位置は表現系が異なるため各レンダラ側が持つ）。
 pub const READY_HINT: &str = "──  press SPACE  ──";
+
+/// 固定タイムステップ（[`DT`]）のアキュムレータ。実経過時間を渡すと、消化すべき `tick()` 数を返す。
+/// [`MAX_FRAME_DT`] クランプを内蔵し、`DT` 未満の端数は内部に保持して次フレームへ繰り越す
+/// （描画頻度に依存しない決定論的な物理進行）。term/web はこの「クランプ＋固定ステップ消化」を共有し、
+/// 実時間の取得源（`Instant` / RAF timestamp）のみ各レンダラが持つ（#139）。
+#[derive(Debug, Default)]
+pub struct Accumulator {
+    acc: f32,
+}
+
+impl Accumulator {
+    /// 空（未消化時間 0）の状態で生成する。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 実経過時間 `real_dt`（秒）を [`MAX_FRAME_DT`] でクランプして加算し、消化できる固定ステップ数を
+    /// 返す。返した分は内部から差し引き、`DT` 未満の端数は保持して次回 `advance` に繰り越す。
+    pub fn advance(&mut self, real_dt: f32) -> u32 {
+        self.acc += real_dt.min(MAX_FRAME_DT);
+        let mut ticks = 0;
+        while self.acc >= DT {
+            self.acc -= DT;
+            ticks += 1;
+        }
+        ticks
+    }
+}
 
 /// チューニング値の集約。デフォルトは DESIGN §7 の初期値。
 pub struct Config {
@@ -665,5 +697,38 @@ mod tests {
             actual, expected,
             "restart must continue the rng stream, not re-seed"
         );
+    }
+
+    #[test]
+    fn accumulator_consumes_whole_steps() {
+        // DT 3 つぶんの実時間 → ちょうど 3 tick（端数はほぼ 0）。
+        let mut a = Accumulator::new();
+        assert_eq!(a.advance(DT * 3.0), 3);
+    }
+
+    #[test]
+    fn accumulator_clamps_large_dt() {
+        // MAX_FRAME_DT を超える実時間は spiral of death 防止でクランプされ、
+        // 0.10s 相当（≈ MAX_FRAME_DT / DT = 6 tick）を超える tick は返さない。
+        let mut a = Accumulator::new();
+        let n = a.advance(1.0); // 1 秒（>> MAX_FRAME_DT）
+        let max_ticks = (MAX_FRAME_DT / DT).ceil() as u32;
+        assert!(
+            n <= max_ticks,
+            "clamped tick count {n} must be <= {max_ticks}"
+        );
+        assert!(
+            n >= max_ticks - 1,
+            "MAX_FRAME_DT worth should still yield ~{max_ticks} ticks, got {n}"
+        );
+    }
+
+    #[test]
+    fn accumulator_carries_remainder() {
+        // 端数を捨てず次回へ繰り越す: DT*1.5 を 2 回 → 合計 3 tick
+        // （繰り越さなければ各回 1 tick で合計 2 にしかならない）。
+        let mut a = Accumulator::new();
+        let total = a.advance(DT * 1.5) + a.advance(DT * 1.5);
+        assert_eq!(total, 3);
     }
 }
