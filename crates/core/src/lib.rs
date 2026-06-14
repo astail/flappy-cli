@@ -26,8 +26,30 @@ pub const GAMEOVER_RETRY_HINT: &str = "SPACE / click / r : retry";
 /// Ready 画面のタイトル（#107: GameOver 文言と同様 term/web が同一ソースを参照し文言ズレを防ぐ）。
 pub const READY_TITLE: &str = "F L A P P Y";
 
-/// Ready 画面の開始案内（行位置は表現系が異なるため各レンダラ側が持つ）。
+/// Ready 画面の開始案内（行位置は [`layout`] の単一ソース、表現系の微調整は各レンダラ）。
 pub const READY_HINT: &str = "──  press SPACE  ──";
+
+/// 画面レイアウトの行/列インデックス（term/web 共有の単一ソース。#141）。
+///
+/// term は char グリッドの行/列、web は `行 * cell`（px）として参照する。web のテキストは
+/// baseline=middle のため `+0.5` セルのオフセットが乗るが、それは canvas 起因の各自事情で
+/// 加算するだけで、ここで定義する**行/列インデックス自体は両者で一致**する。
+/// version の「最下行右端」は `rows` 依存のため定数化せず、各レンダラが `rows - 1` 等で算出する
+/// （共有するのは「右端・最下行に置く」配置規約のみ）。
+pub mod layout {
+    /// Ready タイトルの行。
+    pub const READY_TITLE_ROW: u16 = 3;
+    /// Ready 開始案内の行。
+    pub const READY_HINT_ROW: u16 = 8;
+    /// GameOver 罫線ボックスの上端行。
+    pub const GAMEOVER_BOX_TOP: u16 = 2;
+    /// GameOver 罫線ボックスの高さ（行）。内部 4 行（title/score/retry/quit）＋上下罫線。
+    pub const GAMEOVER_BOX_HEIGHT: u16 = 6;
+    /// HUD（SCORE / BEST）の行（最上行に天井ラインと重ねる）。
+    pub const HUD_ROW: u16 = 0;
+    /// HUD の SCORE 左端の列。
+    pub const HUD_SCORE_COL: u16 = 1;
+}
 
 /// 固定タイムステップ（[`DT`]）のアキュムレータ。実経過時間を渡すと、消化すべき `tick()` 数を返す。
 /// [`MAX_FRAME_DT`] クランプを内蔵し、`DT` 未満の端数は内部に保持して次フレームへ繰り越す
