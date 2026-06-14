@@ -7,7 +7,8 @@
 //! 安定する。
 
 use flappy_core::{
-    pipe_blocks_row, Game, Phase, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT, READY_TITLE,
+    layout, pipe_blocks_row, Game, Phase, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT,
+    READY_TITLE,
 };
 
 const BIRD: char = '●';
@@ -217,11 +218,17 @@ fn overlay_text(
         *cell = GROUND;
         *p = Paint::None;
     }
+    let hud = layout::HUD_ROW as usize;
     let score_text = format!("SCORE {}", game.score());
-    place_at(&mut chars[0], &mut paint[0], &score_text, 1);
+    place_at(
+        &mut chars[hud],
+        &mut paint[hud],
+        &score_text,
+        layout::HUD_SCORE_COL as usize,
+    );
     let best_text = format!("BEST {}", game.best());
     let best_start = cols_u.saturating_sub(best_text.chars().count() + 1);
-    place_at(&mut chars[0], &mut paint[0], &best_text, best_start);
+    place_at(&mut chars[hud], &mut paint[hud], &best_text, best_start);
 
     // 地面ライン（最下行）。右端に version を控えめに重ねる（単一ソース = core）。
     let last = rows as usize - 1;
@@ -237,17 +244,20 @@ fn overlay_text(
     // メッセージのオーバーレイ。
     match game.phase() {
         Phase::Ready => {
-            place_centered(&mut chars[3], &mut paint[3], READY_TITLE, cols);
-            place_centered(&mut chars[8], &mut paint[8], READY_HINT, cols);
+            let (title, hint) = (
+                layout::READY_TITLE_ROW as usize,
+                layout::READY_HINT_ROW as usize,
+            );
+            place_centered(&mut chars[title], &mut paint[title], READY_TITLE, cols);
+            place_centered(&mut chars[hint], &mut paint[hint], READY_HINT, cols);
         }
         Phase::GameOver => {
             draw_gameover_box(chars, paint, cols, game.score());
             // 死亡した鳥は ✕ の文字で表す（render はブロブを描かない）。棒セルの上で
             // 死んだ場合も ✕ が棒色にならないよう paint を BirdDead にする（赤で描く）。
-            let (bc, br) = game.bird_cell();
-            // 天井死は bird_cell の row が 0 にクランプされる（core lib.rs の max(0)）。
-            // ✕ が天井ライン/HUD 帯（row 0）を潰さないよう、プレイエリア最上行（row 1）へ寄せる。
-            let br = br.max(1);
+            // 描画用セル（core の bird_display_cell）は天井死で衝突用 row が 0 に来ても
+            // ✕ が天井ライン/HUD 帯を潰さないよう row 1 へ寄せる（#138: クランプは core が単一ソース）。
+            let (bc, br) = game.bird_display_cell();
             if (br as usize) < rows as usize && bc < cols {
                 chars[br as usize][bc as usize] = BIRD_DEAD;
                 paint[br as usize][bc as usize] = Paint::BirdDead;
@@ -257,11 +267,10 @@ fn overlay_text(
     }
 
     // 生存中の鳥は ● の 1 文字で描く（render はブロブを描かない。web の塗り円と見た目を揃える）。
-    // 行は bird_cell()（衝突と同じ round 行）。死亡 ✕ と同様、天井死クランプ等で row 0 に来ても
-    // 天井ライン/HUD 帯を潰さないよう row 1 以上へ寄せる。
+    // 行は描画用セル bird_display_cell（衝突と同じ round 行を row 1 以上へクランプ）。死亡 ✕ と
+    // 同様、天井死クランプ等で row 0 に来ても天井ライン/HUD 帯を潰さない（#138: クランプは core 集約）。
     if game.phase() != Phase::GameOver {
-        let (bc, br) = game.bird_cell();
-        let br = br.max(1);
+        let (bc, br) = game.bird_display_cell();
         if (br as usize) < rows as usize && bc < cols {
             chars[br as usize][bc as usize] = BIRD;
             paint[br as usize][bc as usize] = Paint::Bird;
@@ -280,7 +289,7 @@ pub fn scene_to_string(game: &Game) -> String {
 fn draw_gameover_box(chars: &mut [Vec<char>], paint: &mut [Vec<Paint>], cols: u16, score: u32) {
     let inner_w = GAMEOVER_RETRY_HINT.chars().count();
     let start = (cols as usize).saturating_sub(inner_w + 2) / 2;
-    let top = 2usize;
+    let top = layout::GAMEOVER_BOX_TOP as usize;
 
     let border_top: String = format!("╔{}╗", "═".repeat(inner_w));
     let border_bottom: String = format!("╚{}╝", "═".repeat(inner_w));
@@ -303,6 +312,8 @@ fn draw_gameover_box(chars: &mut [Vec<char>], paint: &mut [Vec<Paint>], cols: u1
         line("q                 : quit"),
         border_bottom,
     ];
+    // ボックス高さ（罫線2＋内部4=6行）は core の単一ソースと一致（#141: web の枠 bh と同じ高さ）。
+    debug_assert_eq!(body.len(), layout::GAMEOVER_BOX_HEIGHT as usize);
     for (i, text) in body.iter().enumerate() {
         let row = top + i;
         if row < chars.len() {

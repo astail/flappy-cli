@@ -10,6 +10,10 @@ use rng::Rng;
 /// 物理の固定タイムステップ（秒）。レンダラはアキュムレータで `tick()` 回数を制御する。
 pub const DT: f32 = 1.0 / 60.0;
 
+/// 1 フレームで消化する実時間の上限（秒）。描画ヒッチやタブ復帰で溜まった実時間を
+/// 一気に tick して即死/カクつく「spiral of death」を防ぐ安全網。[`Accumulator`] が内蔵する。
+pub const MAX_FRAME_DT: f32 = 0.10;
+
 /// ビルド時の version（= Cargo.toml の version）。term/web の画面描画（#40）で参照する。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -22,8 +26,58 @@ pub const GAMEOVER_RETRY_HINT: &str = "SPACE / click / r : retry";
 /// Ready 画面のタイトル（#107: GameOver 文言と同様 term/web が同一ソースを参照し文言ズレを防ぐ）。
 pub const READY_TITLE: &str = "F L A P P Y";
 
-/// Ready 画面の開始案内（行位置は表現系が異なるため各レンダラ側が持つ）。
+/// Ready 画面の開始案内（行位置は [`layout`] の単一ソース、表現系の微調整は各レンダラ）。
 pub const READY_HINT: &str = "──  press SPACE  ──";
+
+/// 画面レイアウトの行/列インデックス（term/web 共有の単一ソース。#141）。
+///
+/// term は char グリッドの行/列、web は `行 * cell`（px）として参照する。web のテキストは
+/// baseline=middle のため `+0.5` セルのオフセットが乗るが、それは canvas 起因の各自事情で
+/// 加算するだけで、ここで定義する**行/列インデックス自体は両者で一致**する。
+/// version の「最下行右端」は `rows` 依存のため定数化せず、各レンダラが `rows - 1` 等で算出する
+/// （共有するのは「右端・最下行に置く」配置規約のみ）。
+pub mod layout {
+    /// Ready タイトルの行。
+    pub const READY_TITLE_ROW: u16 = 3;
+    /// Ready 開始案内の行。
+    pub const READY_HINT_ROW: u16 = 8;
+    /// GameOver 罫線ボックスの上端行。
+    pub const GAMEOVER_BOX_TOP: u16 = 2;
+    /// GameOver 罫線ボックスの高さ（行）。内部 4 行（title/score/retry/quit）＋上下罫線。
+    pub const GAMEOVER_BOX_HEIGHT: u16 = 6;
+    /// HUD（SCORE / BEST）の行（最上行に天井ラインと重ねる）。
+    pub const HUD_ROW: u16 = 0;
+    /// HUD の SCORE 左端の列。
+    pub const HUD_SCORE_COL: u16 = 1;
+}
+
+/// 固定タイムステップ（[`DT`]）のアキュムレータ。実経過時間を渡すと、消化すべき `tick()` 数を返す。
+/// [`MAX_FRAME_DT`] クランプを内蔵し、`DT` 未満の端数は内部に保持して次フレームへ繰り越す
+/// （描画頻度に依存しない決定論的な物理進行）。term/web はこの「クランプ＋固定ステップ消化」を共有し、
+/// 実時間の取得源（`Instant` / RAF timestamp）のみ各レンダラが持つ（#139）。
+#[derive(Debug, Default)]
+pub struct Accumulator {
+    acc: f32,
+}
+
+impl Accumulator {
+    /// 空（未消化時間 0）の状態で生成する。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 実経過時間 `real_dt`（秒）を [`MAX_FRAME_DT`] でクランプして加算し、消化できる固定ステップ数を
+    /// 返す。返した分は内部から差し引き、`DT` 未満の端数は保持して次回 `advance` に繰り越す。
+    pub fn advance(&mut self, real_dt: f32) -> u32 {
+        self.acc += real_dt.min(MAX_FRAME_DT);
+        let mut ticks = 0;
+        while self.acc >= DT {
+            self.acc -= DT;
+            ticks += 1;
+        }
+        ticks
+    }
+}
 
 /// チューニング値の集約。デフォルトは DESIGN §7 の初期値。
 pub struct Config {
@@ -231,11 +285,23 @@ impl Game {
         self.bird_y.round() as i32
     }
 
-    /// 鳥の描画セル `(col, row)`。衝突判定と同一の丸め。
+    /// 鳥の衝突セル `(col, row)`。衝突判定と同一の丸め（row は `max(0)` で天井行 0 まで許す）。
+    /// 描画は天井ライン/HUD 帯（row 0）を潰さないため [`bird_display_cell`](Self::bird_display_cell)
+    /// を使う（用途で使い分け。#138）。
     pub fn bird_cell(&self) -> (u16, u16) {
         let col = (self.cfg.bird_col as i32).max(0) as u16;
         let row = self.bird_row().max(0) as u16;
         (col, row)
+    }
+
+    /// 鳥の描画セル `(col, row)`。衝突用 [`bird_cell`](Self::bird_cell) の row を 1 以上に
+    /// クランプする。row 0 は天井ライン / HUD 帯であり、ここに鳥（● / ✕ / web の塗り円）を
+    /// 描くと帯を潰すため、天井死などで row が 0 に来てもプレイエリア最上行（row 1）へ寄せる
+    /// （#112 系のズレ防止）。term/web の鳥描画はすべてこれを経由する（#138: 3 箇所に重複していた
+    /// `row.max(1)` の単一ソース）。衝突判定は row 0 を含める必要があるため `bird_cell` と使い分ける。
+    pub fn bird_display_cell(&self) -> (u16, u16) {
+        let (col, row) = self.bird_cell();
+        (col, row.max(1))
     }
 
     /// フラップ入力。Ready なら Playing 化、いずれにせよ Playing 中は上向き初速を与える。
@@ -517,6 +583,31 @@ mod tests {
     }
 
     #[test]
+    fn bird_display_cell_clamps_row_to_play_area_top() {
+        // 天井死では衝突用 row が 0（天井ライン/HUD 帯）に来るが、描画用は row 1 へ寄せる（#138）。
+        let mut g = Game::new(Config::default(), 1);
+        for _ in 0..300 {
+            g.flap();
+            g.tick();
+            if g.phase() == Phase::GameOver {
+                break;
+            }
+        }
+        assert_eq!(g.phase(), Phase::GameOver);
+        assert_eq!(g.bird_cell().1, 0, "天井死は衝突用 row が 0");
+        assert_eq!(g.bird_display_cell().1, 1, "描画用 row は 1 にクランプ");
+        assert_eq!(g.bird_display_cell().0, g.bird_cell().0, "col は据え置き");
+    }
+
+    #[test]
+    fn bird_display_cell_equals_bird_cell_when_row_positive() {
+        // 通常飛行（row >= 1）では描画用と衝突用は一致する（クランプが効かない）。
+        let g = Game::new(Config::default(), 1);
+        assert!(g.bird_cell().1 >= 1, "Ready は中央付近で row >= 1");
+        assert_eq!(g.bird_display_cell(), g.bird_cell());
+    }
+
+    #[test]
     fn bird_hits_pipe_outside_gap_triggers_gameover() {
         // 鳥を右端寄りに置き最初の棒がすぐ到達するようにし、隙間が鳥の行を
         // 外す seed を探す（決定論・有限）。境界でない GameOver = 棒衝突。
@@ -708,5 +799,38 @@ mod tests {
         let b = Game::new(Config::default(), 55);
         assert_eq!(a.pipes()[0].gap_top, b.pipes()[0].gap_top);
         assert_eq!(a.pipes()[0].course_idx, 0);
+    }
+
+    #[test]
+    fn accumulator_consumes_whole_steps() {
+        // DT 3 つぶんの実時間 → ちょうど 3 tick（端数はほぼ 0）。
+        let mut a = Accumulator::new();
+        assert_eq!(a.advance(DT * 3.0), 3);
+    }
+
+    #[test]
+    fn accumulator_clamps_large_dt() {
+        // MAX_FRAME_DT を超える実時間は spiral of death 防止でクランプされ、
+        // 0.10s 相当（≈ MAX_FRAME_DT / DT = 6 tick）を超える tick は返さない。
+        let mut a = Accumulator::new();
+        let n = a.advance(1.0); // 1 秒（>> MAX_FRAME_DT）
+        let max_ticks = (MAX_FRAME_DT / DT).ceil() as u32;
+        assert!(
+            n <= max_ticks,
+            "clamped tick count {n} must be <= {max_ticks}"
+        );
+        assert!(
+            n >= max_ticks - 1,
+            "MAX_FRAME_DT worth should still yield ~{max_ticks} ticks, got {n}"
+        );
+    }
+
+    #[test]
+    fn accumulator_carries_remainder() {
+        // 端数を捨てず次回へ繰り越す: DT*1.5 を 2 回 → 合計 3 tick
+        // （繰り越さなければ各回 1 tick で合計 2 にしかならない）。
+        let mut a = Accumulator::new();
+        let total = a.advance(DT * 1.5) + a.advance(DT * 1.5);
+        assert_eq!(total, 3);
     }
 }

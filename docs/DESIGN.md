@@ -72,19 +72,22 @@ Space 押しっぱなし（キーリピート）時の連続フラップは term
 
 ```
 const DT = 1.0 / 60.0                 // 固定物理ステップ（core が公開）
-last = now();  acc = 0.0
+const MAX_FRAME_DT = 0.10             // 1フレームで消化する実時間の上限（core が公開）
+acc = Accumulator::new();  last = now()   // クランプ＋固定ステップ消化は core の Accumulator が単一ソース
 loop {
-    t = now();  acc += min(t - last, 0.10);  last = t   // 実時間を蓄積。1フレーム上限 0.10s=6tick（超過分は捨てる＝処理が遅れたら物理がスロー化し spiral of death を防止。無操作落下も最大~3行に制限）
+    t = now();  ticks = acc.advance(t - last);  last = t   // 実時間を Accumulator へ。MAX_FRAME_DT 超過分は捨てる（=6tick上限。処理が遅れたら物理がスロー化し spiral of death を防止。無操作落下も最大~3行に制限）
     for ev in poll_input() {              // 非ブロッキング入力
         Space/Click => if phase == GameOver { game.restart() } else { game.flap() }
         R           => game.restart()      //   全 phase で即リスタート（term/web 共通）
         Q/Esc       => quit                //   term のみ
     }
-    while acc >= DT { game.tick(); acc -= DT }     // 固定ステップで物理更新（tick は内部で DT を使う。Playing 時のみ）
+    for _ in 0..ticks { game.tick() }     // 返った回数だけ固定ステップで物理更新（tick は内部で DT を使う。Playing 時のみ）
     render(&game)                          // core の状態 → 文字グリッド / canvas 矩形
     // 描画頻度は自由（term ~30–60Hz / web は requestAnimationFrame）。物理は常に DT 刻み
 }
 ```
+
+`MAX_FRAME_DT`（=0.10s）のクランプと「固定ステップ消化＋端数繰り越し」は core の `Accumulator` が単一ソース（#139: かつて両レンダラに散っていた `0.10` マジックナンバーと `while acc >= DT` を core 定数＋型に昇格）。実時間の取得源（term の `Instant` 差分 / web の RAF timestamp 差分）のみ各レンダラが持つ。
 
 ---
 
@@ -156,6 +159,17 @@ loop {
 - グリッドより端末が広い場合はセンタリング（レターボックス）。**最小サイズ = 64×24**。未満なら「端末を 64×24 以上にしてください」と表示して描画を止める（ポーズ）。プレイ中の端末リサイズ（`Event::Resize`）は次フレームで再センタリングのみ行い、ゲーム状態は不変。
 - web の canvas は 1セル=固定 px（例 16px）→ `64*16 × 24*16` を CSS で中央寄せ。
 
+**レイアウト座標の単一ソース（#141）**: Ready / GameOver / HUD の行・列インデックスは core の `layout` モジュール（§3）が単一ソース。term は char グリッドの行/列、web は `行 * cell`（px）として参照する。web のテキスト baseline=middle 由来の `+0.5` セルオフセットは **web 側で各自加算**する（インデックス自体は両者一致）。GameOver ボックス内の文言行は `GAMEOVER_BOX_TOP` からの相対（term は `top+i`、web は `(top+1.5/2.5/3.5)*cell`）で両者が同じ上端に追従する。version の「最下行右端」は `rows` 依存のため定数化せず各レンダラが `rows-1` 等で算出する（共有は「右端・最下行」の配置規約のみ）。
+
+| 要素 | core `layout` 定数 | 値 |
+|---|---|---|
+| Ready タイトル行 | `READY_TITLE_ROW` | 3 |
+| Ready ヒント行 | `READY_HINT_ROW` | 8 |
+| GameOver ボックス上端 | `GAMEOVER_BOX_TOP` | 2 |
+| GameOver ボックス高さ（行） | `GAMEOVER_BOX_HEIGHT` | 6 |
+| HUD 行 | `HUD_ROW` | 0 |
+| HUD SCORE 左端列 | `HUD_SCORE_COL` | 1 |
+
 ---
 
 ## 3. core クレート（flappy-core）— 依存ゼロ・純粋ロジック
@@ -195,10 +209,12 @@ pub struct Game {
 - `flap(&mut self)` — Ready なら Playing 化、Playing なら `bird_vy = flap_impulse`
 - `tick(&mut self)` — Playing 時のみ物理更新（後述）。**内部で固定 `DT = 1/60` を進める**（可変 dt は受け取らない＝決定論を型で強制。実 dt の揺れは物理に入らずプラットフォーム非依存）。core は `pub const DT: f32 = 1.0 / 60.0;` を公開し、レンダラ側がアキュムレータで `tick()` の呼び出し回数を制御する（§1）
 - `restart(&mut self)` — best を保持して初期化
-- 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は衝突と同じ round 済み行で、鳥の描画行もこれに揃える（判定と描画の一致用）。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
+- 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `bird_display_cell() -> (u16,u16)`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は**衝突用**（row は `max(0)` で天井行 0 まで許す＝衝突判定と同じ round 行）、`bird_display_cell()` は**描画用**（その row を 1 以上へクランプ。row 0 = 天井ライン/HUD 帯を鳥が潰さないため）。鳥の描画（term の ● / ✕・web の塗り円）は `bird_display_cell()` を経由し、`row.max(1)` クランプを core に単一ソース化（#138）。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
 - `pipe_blocks_row(gap_top, pipe_gap, rows, row) -> bool` — 棒がその行を占有するかの純粋述語。**判定と描画が共有する唯一の占有定義**（§3 冒頭の「描画と判定の乖離防止」の実体）
 - `primary_action(phase: Phase) -> PrimaryAction`（`{ Flap, Restart }`）— 主操作（SPACE/クリック・タップ）の phase→効果判定の純粋関数。**term の `input::route` と web の `apply_primary` が共有する唯一のルーティング定義**（§1。入力分類は各レンダラ責務）
-- 共有定数: `DT`（固定ステップ）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言）, `READY_TITLE` / `READY_HINT`（Ready 画面文言）。画面文言は term/web で共有し文言ズレを防ぐ（行位置の数値は表現系が異なるため各レンダラが持つ）
+- 共有定数: `DT`（固定ステップ）, `MAX_FRAME_DT`（1フレーム消化上限 0.10s。`Accumulator` が内蔵）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言）, `READY_TITLE` / `READY_HINT`（Ready 画面文言）。画面文言は term/web で共有し文言ズレを防ぐ
+- `layout` モジュール — Ready/GameOver/HUD の行・列インデックス（`READY_TITLE_ROW`=3 / `READY_HINT_ROW`=8 / `GAMEOVER_BOX_TOP`=2 / `GAMEOVER_BOX_HEIGHT`=6 / `HUD_ROW`=0 / `HUD_SCORE_COL`=1）。term/web 共有の単一ソース（§2。web の baseline 由来 +0.5 セルと version の `rows` 依存算出のみ各レンダラ）
+- `Accumulator` — 固定タイムステップのアキュムレータ。`advance(real_dt) -> u32` が `MAX_FRAME_DT` クランプ＋固定ステップ消化＋端数繰り越しを担い、消化すべき `tick()` 数を返す。term/web の蓄積ループの単一ソース（§1。実時間取得のみ各レンダラ）
 - 初期化（new / restart）: `bird_y` は画面中央付近。最初の棒を `x = cols`（右端）に1本だけ生成し、`dist_to_next = pipe_spacing` から開始（1本目が鳥に届くまで約 `cols - bird_col` 列 ≈ 1画面ぶんの助走になり、開始即死を防ぐ）
 
 ### tick の中身（処理順）

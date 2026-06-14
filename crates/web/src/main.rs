@@ -14,8 +14,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use flappy_core::{
-    pipe_blocks_row, primary_action, Config, Game, Phase, PrimaryAction, DT, GAMEOVER_RETRY_HINT,
-    GAMEOVER_TITLE, READY_HINT, READY_TITLE, VERSION,
+    layout, pipe_blocks_row, primary_action, Accumulator, Config, Game, Phase, PrimaryAction,
+    GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT, READY_TITLE, VERSION,
 };
 use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
@@ -94,27 +94,29 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.fill_rect(0.0, 0.0, w, cell);
     ctx.fill_rect(0.0, (rows as f64 - 1.0) * cell, w, cell);
 
-    // 鳥（塗り円）。横は bird_col 固定。縦は生存・死亡とも bird_cell() の round 行
-    // （= 衝突判定行）のセル中心に置く。term は鳥を ● / ✕ の 1 文字（= 1 セル）で描くため、
+    // 鳥（塗り円）。横は bird_col 固定。縦は生存・死亡とも描画用セル bird_display_cell() の
+    // round 行のセル中心に置く。term は鳥を ● / ✕ の 1 文字（= 1 セル）で描くため、
     // web も「1 セル = 1 円」を同じ round 行に合わせる（term/web で見た目・段差を一致させる）。
-    // 天井死は bird_cell の row が 0 にクランプされる（core の max(0)）ため、円が天井ライン/HUD 帯
-    // （row 0）を潰さないようプレイエリア最上行（row 1）へ寄せる（term の ● / ✕ と一致）。
+    // 天井死で衝突用 row が 0 に来ても、core の bird_display_cell が row 1（プレイエリア最上行）へ
+    // クランプし、円が天井ライン/HUD 帯（row 0）を潰さない（#138: クランプは core 単一ソース・term と一致）。
     let cx = (cfg.bird_col as f64 + 0.5) * cell;
     let dead = game.phase() == Phase::GameOver;
-    let cy = (game.bird_cell().1.max(1) as f64 + 0.5) * cell;
+    let cy = (game.bird_display_cell().1 as f64 + 0.5) * cell;
     let r = cell * 0.5 - 1.0;
     ctx.set_fill_style_str(if dead { COLOR_BIRD_DEAD } else { COLOR_BIRD });
     ctx.begin_path();
     let _ = ctx.arc(cx, cy, r, 0.0, std::f64::consts::PI * 2.0);
     ctx.fill();
 
-    // HUD（最上行）: 左 SCORE、右 BEST。
+    // HUD（最上行）: 左 SCORE、右 BEST。行/列は core の layout（term と同一インデックス）。
+    // baseline=middle 由来の +0.5 セルは web 各自で加算する（#141）。
     ctx.set_fill_style_str(COLOR_TEXT);
     ctx.set_font("16px monospace");
     ctx.set_text_baseline("middle");
-    let hud_y = cell * 0.5;
+    let hud_y = (layout::HUD_ROW as f64 + 0.5) * cell;
     ctx.set_text_align("left");
-    let _ = ctx.fill_text(&format!("SCORE {}", game.score()), cell, hud_y);
+    let score_x = layout::HUD_SCORE_COL as f64 * cell;
+    let _ = ctx.fill_text(&format!("SCORE {}", game.score()), score_x, hud_y);
     ctx.set_text_align("right");
     let _ = ctx.fill_text(&format!("BEST {}", game.best()), w - cell, hud_y);
 
@@ -130,31 +132,49 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.set_text_align("center");
     match game.phase() {
         Phase::Ready => {
+            // 行は core の layout（term と同一インデックス）。+0.5 は baseline=middle 由来（#141）。
             ctx.set_font("bold 32px monospace");
-            let _ = ctx.fill_text(READY_TITLE, w / 2.0, 3.5 * cell);
+            let _ = ctx.fill_text(
+                READY_TITLE,
+                w / 2.0,
+                (layout::READY_TITLE_ROW as f64 + 0.5) * cell,
+            );
             ctx.set_font("16px monospace");
-            let _ = ctx.fill_text(READY_HINT, w / 2.0, 8.5 * cell);
+            let _ = ctx.fill_text(
+                READY_HINT,
+                w / 2.0,
+                (layout::READY_HINT_ROW as f64 + 0.5) * cell,
+            );
         }
         Phase::GameOver => {
             // 罫線ボックス相当の枠（#76: term の draw_gameover_box と同じ行・同じ幅）。
             // term はボックス文字で背面の棒を隠すため、web も内側を背景色で塗ってから枠線を引く。
+            // 上端/高さ/内部行は core の layout（term と同一インデックス。#141）。
             let box_w_cells = (GAMEOVER_RETRY_HINT.chars().count() + 2) as f64; // 罫線込み幅（セル）
+            let top = layout::GAMEOVER_BOX_TOP as f64;
             let bx = ((cols as f64 - box_w_cells) / 2.0).floor() * cell;
-            let by = 2.0 * cell;
-            let (bw, bh) = (box_w_cells * cell, 6.0 * cell);
+            let by = top * cell;
+            let (bw, bh) = (
+                box_w_cells * cell,
+                layout::GAMEOVER_BOX_HEIGHT as f64 * cell,
+            );
             ctx.set_fill_style_str(COLOR_BG);
             ctx.fill_rect(bx, by, bw, bh);
             ctx.set_stroke_style_str(COLOR_TEXT);
             ctx.stroke_rect(bx, by, bw, bh);
-            // 文言は core の定数（term と同一ソース）。行位置も term のボックス内行に合わせ、
-            // x は枠の中心（キャンバス中心とは 0.5 セルずれる）に揃える。
+            // 文言は core の定数（term と同一ソース）。行位置も term のボックス内行（top+1/+2/+3）に合わせ、
+            // +0.5 は baseline=middle 由来。x は枠の中心（キャンバス中心とは 0.5 セルずれる）に揃える。
             let box_cx = bx + bw / 2.0;
             ctx.set_fill_style_str(COLOR_TEXT);
             ctx.set_font("bold 16px monospace");
-            let _ = ctx.fill_text(GAMEOVER_TITLE, box_cx, 3.5 * cell);
+            let _ = ctx.fill_text(GAMEOVER_TITLE, box_cx, (top + 1.5) * cell);
             ctx.set_font("16px monospace");
-            let _ = ctx.fill_text(&format!("SCORE {}", game.score()), box_cx, 4.5 * cell);
-            let _ = ctx.fill_text(GAMEOVER_RETRY_HINT, box_cx, 5.5 * cell);
+            let _ = ctx.fill_text(
+                &format!("SCORE {}", game.score()),
+                box_cx,
+                (top + 2.5) * cell,
+            );
+            let _ = ctx.fill_text(GAMEOVER_RETRY_HINT, box_cx, (top + 3.5) * cell);
             // 「q : quit」行は term のみ（web に終了概念がないため。DESIGN §2 の許容差）。
         }
         Phase::Playing => {}
@@ -236,8 +256,8 @@ fn main() {
 
     // 蓄積ループの状態。RAF 描画と visibilitychange ハンドラで共有する。
     // last_time: 前フレームの RAF タイムスタンプ（ms）。None は「次フレームを基準に
-    // やり直す」合図（初回・復帰直後）。acc: 未消化の実時間（秒）。
-    let acc = Rc::new(Cell::new(0.0f32));
+    // やり直す」合図（初回・復帰直後）。acc: core の Accumulator（未消化時間＋固定ステップ消化）。
+    let acc = Rc::new(RefCell::new(Accumulator::new()));
     let last_time = Rc::new(Cell::new(None::<f64>));
 
     // visibilitychange: 非表示→復帰の一発死防止。背景タブでは RAF 自体が止まるため、
@@ -246,7 +266,7 @@ fn main() {
         let acc = acc.clone();
         let last_time = last_time.clone();
         EventListener::new(&document, "visibilitychange", move |_event| {
-            acc.set(0.0);
+            *acc.borrow_mut() = Accumulator::new();
             last_time.set(None);
         })
         .forget();
@@ -258,18 +278,18 @@ fn main() {
     let f: Rc<RefCell<Option<RafCallback>>> = Rc::new(RefCell::new(None));
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::wrap(Box::new(move |time: f64| {
-        if let Some(last) = last_time.get() {
-            // 1 フレーム上限 0.10s（描画ヒッチ・復帰時の spiral of death を防ぐ安全網）。
-            let dt = ((time - last) / 1000.0) as f32;
-            acc.set(acc.get() + dt.min(0.10));
-        }
+        // 実経過時間を core の Accumulator に渡し、消化すべき tick 数を得る。
+        // MAX_FRAME_DT クランプ（spiral of death 防止）と固定ステップ消化は core が単一ソース（#139）。
+        let ticks = match last_time.get() {
+            Some(last) => acc.borrow_mut().advance(((time - last) / 1000.0) as f32),
+            None => 0, // 初回・復帰直後は基準フレームを置くだけ（tick しない）。
+        };
         last_time.set(Some(time));
 
         {
             let mut game = game.borrow_mut();
-            while acc.get() >= DT {
+            for _ in 0..ticks {
                 game.tick();
-                acc.set(acc.get() - DT);
             }
         }
 
