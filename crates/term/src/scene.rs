@@ -186,10 +186,9 @@ fn overlay_text(
             draw_gameover_box(chars, paint, cols, game.score());
             // 死亡した鳥は ✕ の文字で表す（render はブロブを描かない）。棒セルの上で
             // 死んだ場合も ✕ が棒色にならないよう paint を BirdDead にする（赤で描く）。
-            let (bc, br) = game.bird_cell();
-            // 天井死は bird_cell の row が 0 にクランプされる（core lib.rs の max(0)）。
-            // ✕ が天井ライン/HUD 帯（row 0）を潰さないよう、プレイエリア最上行（row 1）へ寄せる。
-            let br = br.max(1);
+            // 描画用セル（core の bird_display_cell）は天井死で衝突用 row が 0 に来ても
+            // ✕ が天井ライン/HUD 帯を潰さないよう row 1 へ寄せる（#138: クランプは core が単一ソース）。
+            let (bc, br) = game.bird_display_cell();
             if (br as usize) < rows as usize && bc < cols {
                 chars[br as usize][bc as usize] = BIRD_DEAD;
                 paint[br as usize][bc as usize] = Paint::BirdDead;
@@ -199,11 +198,10 @@ fn overlay_text(
     }
 
     // 生存中の鳥は ● の 1 文字で描く（render はブロブを描かない。web の塗り円と見た目を揃える）。
-    // 行は bird_cell()（衝突と同じ round 行）。死亡 ✕ と同様、天井死クランプ等で row 0 に来ても
-    // 天井ライン/HUD 帯を潰さないよう row 1 以上へ寄せる。
+    // 行は描画用セル bird_display_cell（衝突と同じ round 行を row 1 以上へクランプ）。死亡 ✕ と
+    // 同様、天井死クランプ等で row 0 に来ても天井ライン/HUD 帯を潰さない（#138: クランプは core 集約）。
     if game.phase() != Phase::GameOver {
-        let (bc, br) = game.bird_cell();
-        let br = br.max(1);
+        let (bc, br) = game.bird_display_cell();
         if (br as usize) < rows as usize && bc < cols {
             chars[br as usize][bc as usize] = BIRD;
             paint[br as usize][bc as usize] = Paint::Bird;
