@@ -67,6 +67,28 @@ pub enum Phase {
     GameOver,
 }
 
+/// 主操作（Space / click / tap）が phase に応じて落とす効果。
+/// GameOver はリスタート、Ready/Playing はフラップ（Ready は初回フラップで Playing 化）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimaryAction {
+    Flap,
+    Restart,
+}
+
+/// 主操作を受けたとき phase から効果を決める純粋関数（#137: 判定の単一ソース）。
+///
+/// 入力の「分類」（どのキー/イベントを主操作とみなすか）は各レンダラの責務で、
+/// core が持つのは「主操作を受けた後、phase を見て flap/restart のどちらに落とすか」の
+/// 1 点のみ。term の `input::route`（`Input::Primary` 分岐）と web の `apply_primary` が
+/// 両方これを経由し、二重実装による drift を防ぐ。
+pub fn primary_action(phase: Phase) -> PrimaryAction {
+    if phase == Phase::GameOver {
+        PrimaryAction::Restart
+    } else {
+        PrimaryAction::Flap
+    }
+}
+
 pub struct Pipe {
     pub x: f32,
     pub gap_top: u16,
@@ -338,6 +360,14 @@ mod tests {
             g.bird_vy < 0.0,
             "flap should give upward (negative) velocity"
         );
+    }
+
+    #[test]
+    fn primary_action_flaps_unless_gameover() {
+        // 主操作の効果ルーティングの単一ソース（#137）。term/web 双方がこれを経由する。
+        assert_eq!(primary_action(Phase::Ready), PrimaryAction::Flap);
+        assert_eq!(primary_action(Phase::Playing), PrimaryAction::Flap);
+        assert_eq!(primary_action(Phase::GameOver), PrimaryAction::Restart);
     }
 
     #[test]

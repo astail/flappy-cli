@@ -5,7 +5,7 @@
 //! 単体テスト可能。DESIGN §1 の入力→効果表に対応する。
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
-use flappy_core::Phase;
+use flappy_core::{primary_action, Phase, PrimaryAction};
 
 /// 抽象化した入力種別。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,15 +51,14 @@ pub fn classify(event: &Event) -> Option<Input> {
 
 /// 現在の状態に応じて入力を core 操作へ振り分ける（DESIGN §1）。
 /// SPACE/クリックは GameOver ならリスタート、それ以外はフラップ（Ready は初回フラップで開始）。
+/// `Input::Primary` の phase→効果判定は core の [`primary_action`] が単一ソース（#137）。
+/// このルーティング自体（crossterm 入力の分類）は term の責務として残す。
 pub fn route(input: Input, phase: Phase) -> Action {
     match input {
-        Input::Primary => {
-            if phase == Phase::GameOver {
-                Action::Restart
-            } else {
-                Action::Flap
-            }
-        }
+        Input::Primary => match primary_action(phase) {
+            PrimaryAction::Flap => Action::Flap,
+            PrimaryAction::Restart => Action::Restart,
+        },
         Input::Restart => Action::Restart,
         Input::Quit => Action::Quit,
     }

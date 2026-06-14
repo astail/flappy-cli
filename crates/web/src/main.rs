@@ -14,8 +14,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use flappy_core::{
-    pipe_blocks_row, Config, Game, Phase, DT, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT,
-    READY_TITLE, VERSION,
+    pipe_blocks_row, primary_action, Config, Game, Phase, PrimaryAction, DT, GAMEOVER_RETRY_HINT,
+    GAMEOVER_TITLE, READY_HINT, READY_TITLE, VERSION,
 };
 use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
@@ -46,13 +46,13 @@ fn request_animation_frame(f: &RafCallback) {
         .expect("request_animation_frame failed");
 }
 
-/// 主操作（Space/click/tap）を core へ振り分ける（term の `input::route` と同一）。
-/// GameOver はリスタート、それ以外はフラップ（Ready は初回フラップで Playing 化）。
+/// 主操作（Space/click/tap）を core へ振り分ける。phase→効果の判定は core の
+/// [`primary_action`] が単一ソース（#137: term の `input::route` と判定を共有）。
+/// 主操作の分類（どの JS イベントを主操作とみなすか）は web の責務として残す。
 fn apply_primary(game: &mut Game) {
-    if game.phase() == Phase::GameOver {
-        game.restart();
-    } else {
-        game.flap();
+    match primary_action(game.phase()) {
+        PrimaryAction::Flap => game.flap(),
+        PrimaryAction::Restart => game.restart(),
     }
 }
 
