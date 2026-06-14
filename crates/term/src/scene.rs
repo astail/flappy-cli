@@ -176,6 +176,8 @@ fn render_pipes_text(
     cols: usize,
     rows: usize,
 ) {
+    // `render` の pub 引数として `Some(&[])` を受け取りうるため、後段 `% lines.len()` の
+    // 0 除算を防ぐ境界ガード（実プレイでは main の course_lines_or_exit が 0 行を exit 2 で弾く）。
     if lines.is_empty() {
         return;
     }
@@ -582,6 +584,54 @@ mod tests {
                 .any(|&c| ('\u{2800}'..='\u{28FF}').contains(&c)),
             "course mode must not render Braille pipes"
         );
+    }
+
+    #[test]
+    fn course_mode_cycles_lines_across_pipes() {
+        // 複数の棒が同時に画面内に出るとき、各棒が course_idx に応じて別の行の文字を描く
+        // （course[0]→lines[0]="A...", course[1]→lines[1]="B..."）。cycle 選択の統合検証。
+        let cfg = Config::default();
+        let lines = vec!["AAAAAAAA".to_string(), "BBBBBBBB".to_string()];
+        // gap_top 9/10 はどちらも中央行(12)を含む隙間 → hover で生き延び 2 本目まで出せる。
+        let mut g = Game::with_course(Config::default(), 1, vec![9u16, 10]);
+        g.flap();
+        let center = cfg.rows / 2;
+        let mut idx0_col = None;
+        let mut idx1_col = None;
+        for _ in 0..400 {
+            if g.bird_cell().1 >= center {
+                g.flap();
+            }
+            g.tick();
+            if g.phase() != Phase::Playing {
+                break;
+            }
+            // 画面内の棒を course_idx 別に拾う（同 idx が複数あれば最後のもの）。
+            idx0_col = None;
+            idx1_col = None;
+            for p in g.pipes() {
+                let col = p.x.round();
+                if col < 0.0 || col as usize >= cfg.cols as usize {
+                    continue;
+                }
+                match p.course_idx {
+                    0 => idx0_col = Some(col as usize),
+                    1 => idx1_col = Some(col as usize),
+                    _ => {}
+                }
+            }
+            if idx0_col.is_some() && idx1_col.is_some() {
+                break;
+            }
+        }
+        let c0 = idx0_col.expect("a pipe from lines[0] should be on screen");
+        let c1 = idx1_col.expect("a pipe from lines[1] should be on screen");
+        assert_ne!(c0, c1, "the two pipes must occupy different columns");
+
+        // row 1 は gap_top(9/10) の上＝必ず塞ぐ行。各棒が対応する行の先頭文字を描く。
+        let frame = render(&g, Some(&lines));
+        assert_eq!(frame.chars[1][c0], 'A', "lines[0] pipe must render 'A'");
+        assert_eq!(frame.chars[1][c1], 'B', "lines[1] pipe must render 'B'");
     }
 
     #[test]
