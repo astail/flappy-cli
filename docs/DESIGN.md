@@ -60,6 +60,8 @@ flappy-cli/
 | 全状態 | r | リスタート（→Ready。phase 非依存、term/web 共通） |
 | 全状態 | q / Esc（term のみ） | 終了 |
 
+主操作（SPACE / クリック・タップ）を受けたあとの「phase→効果（flap / restart）」判定は core の `primary_action(phase) -> PrimaryAction`（§3）が単一ソース。term の `input::route`（`Input::Primary` 分岐）と web の `apply_primary` が両方これを経由し、二重実装による drift を防ぐ。プラットフォーム依存の「入力分類」（どのキー/イベントを主操作とみなすか）のみ term/web 各自が持つ。
+
 web の Space は `preventDefault` でページスクロールを抑止する。
 
 Space 押しっぱなし（キーリピート）時の連続フラップは term/web で挙動が異なる（**意図的な許容差**）: web は `keydown` の `event.repeat` を無視して 1 回だけフラップするが、term は raw mode の標準入力では端末のオートリピートと新規打鍵を区別できないため連続フラップになる（kitty keyboard protocol は未使用方針）。
@@ -195,6 +197,7 @@ pub struct Game {
 - `restart(&mut self)` — best を保持して初期化
 - 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は衝突と同じ round 済み行で、鳥の描画行もこれに揃える（判定と描画の一致用）。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
 - `pipe_blocks_row(gap_top, pipe_gap, rows, row) -> bool` — 棒がその行を占有するかの純粋述語。**判定と描画が共有する唯一の占有定義**（§3 冒頭の「描画と判定の乖離防止」の実体）
+- `primary_action(phase: Phase) -> PrimaryAction`（`{ Flap, Restart }`）— 主操作（SPACE/クリック・タップ）の phase→効果判定の純粋関数。**term の `input::route` と web の `apply_primary` が共有する唯一のルーティング定義**（§1。入力分類は各レンダラ責務）
 - 共有定数: `DT`（固定ステップ）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言）, `READY_TITLE` / `READY_HINT`（Ready 画面文言）。画面文言は term/web で共有し文言ズレを防ぐ（行位置の数値は表現系が異なるため各レンダラが持つ）
 - 初期化（new / restart）: `bird_y` は画面中央付近。最初の棒を `x = cols`（右端）に1本だけ生成し、`dist_to_next = pipe_spacing` から開始（1本目が鳥に届くまで約 `cols - bird_col` 列 ≈ 1画面ぶんの助走になり、開始即死を防ぐ）
 
