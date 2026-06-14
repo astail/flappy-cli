@@ -195,7 +195,7 @@ pub struct Game {
 - `flap(&mut self)` — Ready なら Playing 化、Playing なら `bird_vy = flap_impulse`
 - `tick(&mut self)` — Playing 時のみ物理更新（後述）。**内部で固定 `DT = 1/60` を進める**（可変 dt は受け取らない＝決定論を型で強制。実 dt の揺れは物理に入らずプラットフォーム非依存）。core は `pub const DT: f32 = 1.0 / 60.0;` を公開し、レンダラ側がアキュムレータで `tick()` の呼び出し回数を制御する（§1）
 - `restart(&mut self)` — best を保持して初期化
-- 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は衝突と同じ round 済み行で、鳥の描画行もこれに揃える（判定と描画の一致用）。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
+- 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `bird_display_cell() -> (u16,u16)`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は**衝突用**（row は `max(0)` で天井行 0 まで許す＝衝突判定と同じ round 行）、`bird_display_cell()` は**描画用**（その row を 1 以上へクランプ。row 0 = 天井ライン/HUD 帯を鳥が潰さないため）。鳥の描画（term の ● / ✕・web の塗り円）は `bird_display_cell()` を経由し、`row.max(1)` クランプを core に単一ソース化（#138）。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
 - `pipe_blocks_row(gap_top, pipe_gap, rows, row) -> bool` — 棒がその行を占有するかの純粋述語。**判定と描画が共有する唯一の占有定義**（§3 冒頭の「描画と判定の乖離防止」の実体）
 - `primary_action(phase: Phase) -> PrimaryAction`（`{ Flap, Restart }`）— 主操作（SPACE/クリック・タップ）の phase→効果判定の純粋関数。**term の `input::route` と web の `apply_primary` が共有する唯一のルーティング定義**（§1。入力分類は各レンダラ責務）
 - 共有定数: `DT`（固定ステップ）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言）, `READY_TITLE` / `READY_HINT`（Ready 画面文言）。画面文言は term/web で共有し文言ズレを防ぐ（行位置の数値は表現系が異なるため各レンダラが持つ）

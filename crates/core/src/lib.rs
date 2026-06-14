@@ -203,11 +203,23 @@ impl Game {
         self.bird_y.round() as i32
     }
 
-    /// 鳥の描画セル `(col, row)`。衝突判定と同一の丸め。
+    /// 鳥の衝突セル `(col, row)`。衝突判定と同一の丸め（row は `max(0)` で天井行 0 まで許す）。
+    /// 描画は天井ライン/HUD 帯（row 0）を潰さないため [`bird_display_cell`](Self::bird_display_cell)
+    /// を使う（用途で使い分け。#138）。
     pub fn bird_cell(&self) -> (u16, u16) {
         let col = (self.cfg.bird_col as i32).max(0) as u16;
         let row = self.bird_row().max(0) as u16;
         (col, row)
+    }
+
+    /// 鳥の描画セル `(col, row)`。衝突用 [`bird_cell`](Self::bird_cell) の row を 1 以上に
+    /// クランプする。row 0 は天井ライン / HUD 帯であり、ここに鳥（● / ✕ / web の塗り円）を
+    /// 描くと帯を潰すため、天井死などで row が 0 に来てもプレイエリア最上行（row 1）へ寄せる
+    /// （#112 系のズレ防止）。term/web の鳥描画はすべてこれを経由する（#138: 3 箇所に重複していた
+    /// `row.max(1)` の単一ソース）。衝突判定は row 0 を含める必要があるため `bird_cell` と使い分ける。
+    pub fn bird_display_cell(&self) -> (u16, u16) {
+        let (col, row) = self.bird_cell();
+        (col, row.max(1))
     }
 
     /// フラップ入力。Ready なら Playing 化、いずれにせよ Playing 中は上向き初速を与える。
@@ -486,6 +498,31 @@ mod tests {
         assert_eq!(g.phase(), Phase::GameOver);
         let (_, row) = g.bird_cell();
         assert!(row < 1, "should die at ceiling, row={row}");
+    }
+
+    #[test]
+    fn bird_display_cell_clamps_row_to_play_area_top() {
+        // 天井死では衝突用 row が 0（天井ライン/HUD 帯）に来るが、描画用は row 1 へ寄せる（#138）。
+        let mut g = Game::new(Config::default(), 1);
+        for _ in 0..300 {
+            g.flap();
+            g.tick();
+            if g.phase() == Phase::GameOver {
+                break;
+            }
+        }
+        assert_eq!(g.phase(), Phase::GameOver);
+        assert_eq!(g.bird_cell().1, 0, "天井死は衝突用 row が 0");
+        assert_eq!(g.bird_display_cell().1, 1, "描画用 row は 1 にクランプ");
+        assert_eq!(g.bird_display_cell().0, g.bird_cell().0, "col は据え置き");
+    }
+
+    #[test]
+    fn bird_display_cell_equals_bird_cell_when_row_positive() {
+        // 通常飛行（row >= 1）では描画用と衝突用は一致する（クランプが効かない）。
+        let g = Game::new(Config::default(), 1);
+        assert!(g.bird_cell().1 >= 1, "Ready は中央付近で row >= 1");
+        assert_eq!(g.bird_display_cell(), g.bird_cell());
     }
 
     #[test]

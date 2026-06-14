@@ -94,14 +94,14 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.fill_rect(0.0, 0.0, w, cell);
     ctx.fill_rect(0.0, (rows as f64 - 1.0) * cell, w, cell);
 
-    // 鳥（塗り円）。横は bird_col 固定。縦は生存・死亡とも bird_cell() の round 行
-    // （= 衝突判定行）のセル中心に置く。term は鳥を ● / ✕ の 1 文字（= 1 セル）で描くため、
+    // 鳥（塗り円）。横は bird_col 固定。縦は生存・死亡とも描画用セル bird_display_cell() の
+    // round 行のセル中心に置く。term は鳥を ● / ✕ の 1 文字（= 1 セル）で描くため、
     // web も「1 セル = 1 円」を同じ round 行に合わせる（term/web で見た目・段差を一致させる）。
-    // 天井死は bird_cell の row が 0 にクランプされる（core の max(0)）ため、円が天井ライン/HUD 帯
-    // （row 0）を潰さないようプレイエリア最上行（row 1）へ寄せる（term の ● / ✕ と一致）。
+    // 天井死で衝突用 row が 0 に来ても、core の bird_display_cell が row 1（プレイエリア最上行）へ
+    // クランプし、円が天井ライン/HUD 帯（row 0）を潰さない（#138: クランプは core 単一ソース・term と一致）。
     let cx = (cfg.bird_col as f64 + 0.5) * cell;
     let dead = game.phase() == Phase::GameOver;
-    let cy = (game.bird_cell().1.max(1) as f64 + 0.5) * cell;
+    let cy = (game.bird_display_cell().1 as f64 + 0.5) * cell;
     let r = cell * 0.5 - 1.0;
     ctx.set_fill_style_str(if dead { COLOR_BIRD_DEAD } else { COLOR_BIRD });
     ctx.begin_path();
