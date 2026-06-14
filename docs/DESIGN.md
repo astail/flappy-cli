@@ -254,6 +254,9 @@ pub struct Game {
   ```
 - bin 名は `flappy`（`cargo run -p flappy-term` / インストール後 `flappy`）。
 - **`--help` / `--version`**: `flappy --help`（`-h`）は usage を stdout に表示して即終了、`flappy --version`（`-V`）は `flappy {flappy_core::VERSION}` を表示して即終了。いずれも alternate screen に入らない（CLI の慣習）。`--headless` の `--seed`/`--frames` は値の欠落・不正を silent fallback せず非ゼロ終了（exit 2）。
+- **`--cmd "<command>"` モード（文字壁コース・term 限定）** `flappy --cmd "ls -la"`: 指定コマンドを `sh -c` で実行し、stdout の各行（空行は除外）を 1 本の棒に対応させる。隙間の縦位置 `gap_top` は各行内容の FNV-1a ハッシュから `[1, rows-1-pipe_gap]` に写像（同じ出力 → 同じコース・行ごとにバラつく。`ls -la` は行幅が均一で「行長」だと平坦になるためハッシュを採用。**写像を行長に変えたい場合は `course::gap_top_for` 1 つの差し替えで済む**）。棒は緑の Braille でなく**その行の文字を縦に敷き詰めた「文字壁」**で描き（行が棒より短ければ繰り返す）、隙間（穴）を抜ける。行を使い切ったら先頭からループ（エンドレス維持）。コマンド実行は alternate screen 入場“前”に行い、実行失敗・使える行が 0 なら exit 2。`--headless` とは併用しない。
+  - **物理・衝突・スコアは通常モードと同一**（core は `gap_top` 列を受け取るだけ＝`Game::with_course`。衝突は従来どおり `pipe_blocks_row`、文字壁は見た目だけ）。横位置は衝突と同じ `round(p.x)` の 1 セル（Braille の 1/2 セル平滑は course 時のみ無し）。
+  - **term 限定の意図的許容差**: web はシェルコマンドを実行できないため本モードは持たない（course を渡さない通常時は term/web とも従来どおり Braille 棒で完全一致）。「ターミナルで実行する方」に閉じた機能として許容する。文字壁は ASCII 出力を想定（全角は 1 セルに 1 文字を置く都合でずれて見えうる）。
 
 ---
 
