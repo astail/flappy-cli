@@ -72,19 +72,22 @@ Space 押しっぱなし（キーリピート）時の連続フラップは term
 
 ```
 const DT = 1.0 / 60.0                 // 固定物理ステップ（core が公開）
-last = now();  acc = 0.0
+const MAX_FRAME_DT = 0.10             // 1フレームで消化する実時間の上限（core が公開）
+acc = Accumulator::new();  last = now()   // クランプ＋固定ステップ消化は core の Accumulator が単一ソース
 loop {
-    t = now();  acc += min(t - last, 0.10);  last = t   // 実時間を蓄積。1フレーム上限 0.10s=6tick（超過分は捨てる＝処理が遅れたら物理がスロー化し spiral of death を防止。無操作落下も最大~3行に制限）
+    t = now();  ticks = acc.advance(t - last);  last = t   // 実時間を Accumulator へ。MAX_FRAME_DT 超過分は捨てる（=6tick上限。処理が遅れたら物理がスロー化し spiral of death を防止。無操作落下も最大~3行に制限）
     for ev in poll_input() {              // 非ブロッキング入力
         Space/Click => if phase == GameOver { game.restart() } else { game.flap() }
         R           => game.restart()      //   全 phase で即リスタート（term/web 共通）
         Q/Esc       => quit                //   term のみ
     }
-    while acc >= DT { game.tick(); acc -= DT }     // 固定ステップで物理更新（tick は内部で DT を使う。Playing 時のみ）
+    for _ in 0..ticks { game.tick() }     // 返った回数だけ固定ステップで物理更新（tick は内部で DT を使う。Playing 時のみ）
     render(&game)                          // core の状態 → 文字グリッド / canvas 矩形
     // 描画頻度は自由（term ~30–60Hz / web は requestAnimationFrame）。物理は常に DT 刻み
 }
 ```
+
+`MAX_FRAME_DT`（=0.10s）のクランプと「固定ステップ消化＋端数繰り越し」は core の `Accumulator` が単一ソース（#139: かつて両レンダラに散っていた `0.10` マジックナンバーと `while acc >= DT` を core 定数＋型に昇格）。実時間の取得源（term の `Instant` 差分 / web の RAF timestamp 差分）のみ各レンダラが持つ。
 
 ---
 
@@ -198,7 +201,8 @@ pub struct Game {
 - 描画用ゲッター: `phase()`, `bird_cell() -> (u16,u16)`, `bird_display_cell() -> (u16,u16)`, `pipes()`, `config()`, `score() -> u32`, `best() -> u32`。`bird_cell()` は**衝突用**（row は `max(0)` で天井行 0 まで許す＝衝突判定と同じ round 行）、`bird_display_cell()` は**描画用**（その row を 1 以上へクランプ。row 0 = 天井ライン/HUD 帯を鳥が潰さないため）。鳥の描画（term の ● / ✕・web の塗り円）は `bird_display_cell()` を経由し、`row.max(1)` クランプを core に単一ソース化（#138）。`score`/`best` はフィールド private で読み取り専用（加点は tick 内のみ）
 - `pipe_blocks_row(gap_top, pipe_gap, rows, row) -> bool` — 棒がその行を占有するかの純粋述語。**判定と描画が共有する唯一の占有定義**（§3 冒頭の「描画と判定の乖離防止」の実体）
 - `primary_action(phase: Phase) -> PrimaryAction`（`{ Flap, Restart }`）— 主操作（SPACE/クリック・タップ）の phase→効果判定の純粋関数。**term の `input::route` と web の `apply_primary` が共有する唯一のルーティング定義**（§1。入力分類は各レンダラ責務）
-- 共有定数: `DT`（固定ステップ）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言）, `READY_TITLE` / `READY_HINT`（Ready 画面文言）。画面文言は term/web で共有し文言ズレを防ぐ（行位置の数値は表現系が異なるため各レンダラが持つ）
+- 共有定数: `DT`（固定ステップ）, `MAX_FRAME_DT`（1フレーム消化上限 0.10s。`Accumulator` が内蔵）, `VERSION`（HUD 表示用）, `GAMEOVER_TITLE` / `GAMEOVER_RETRY_HINT`（GameOver 画面文言）, `READY_TITLE` / `READY_HINT`（Ready 画面文言）。画面文言は term/web で共有し文言ズレを防ぐ（行位置の数値は表現系が異なるため各レンダラが持つ）
+- `Accumulator` — 固定タイムステップのアキュムレータ。`advance(real_dt) -> u32` が `MAX_FRAME_DT` クランプ＋固定ステップ消化＋端数繰り越しを担い、消化すべき `tick()` 数を返す。term/web の蓄積ループの単一ソース（§1。実時間取得のみ各レンダラ）
 - 初期化（new / restart）: `bird_y` は画面中央付近。最初の棒を `x = cols`（右端）に1本だけ生成し、`dist_to_next = pipe_spacing` から開始（1本目が鳥に届くまで約 `cols - bird_col` 列 ≈ 1画面ぶんの助走になり、開始即死を防ぐ）
 
 ### tick の中身（処理順）

@@ -24,7 +24,7 @@ use crossterm::terminal::{
 };
 use crossterm::{cursor, execute, queue};
 
-use flappy_core::{Config, Game, DT};
+use flappy_core::{Accumulator, Config, Game};
 
 use layout::Layout;
 
@@ -200,7 +200,7 @@ fn main() -> io::Result<()> {
     // 実時間を蓄積し固定 DT 刻みで物理を進める（描画頻度に依存しない＝決定論）。
     let mut last_size = size()?;
     let mut last = Instant::now();
-    let mut acc = 0.0f32;
+    let mut acc = Accumulator::new();
 
     'game: loop {
         // 入力を非ブロッキングで全て取り出して適用。
@@ -227,16 +227,16 @@ fn main() -> io::Result<()> {
                 // ポーズ: 物理を進めず、蓄積時間もリセット（復帰時に飛ばさない）。
                 draw_pause(&mut out, term)?;
                 last = Instant::now();
-                acc = 0.0;
+                acc = Accumulator::new();
             }
             Layout::Fit { ox, oy } => {
                 let now = Instant::now();
-                // 1 フレーム上限 0.10s（=6 tick）で spiral of death を防ぐ。
-                acc += (now - last).as_secs_f32().min(0.10);
+                // 実経過時間を core の Accumulator に渡し、返った回数だけ tick。
+                // MAX_FRAME_DT クランプ（spiral of death 防止）と固定ステップ消化は core が単一ソース（#139）。
+                let ticks = acc.advance((now - last).as_secs_f32());
                 last = now;
-                while acc >= DT {
+                for _ in 0..ticks {
                     game.tick();
-                    acc -= DT;
                 }
                 draw_scene(&mut out, &game, ox, oy)?;
             }

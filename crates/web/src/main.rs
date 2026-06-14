@@ -14,8 +14,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use flappy_core::{
-    pipe_blocks_row, primary_action, Config, Game, Phase, PrimaryAction, DT, GAMEOVER_RETRY_HINT,
-    GAMEOVER_TITLE, READY_HINT, READY_TITLE, VERSION,
+    pipe_blocks_row, primary_action, Accumulator, Config, Game, Phase, PrimaryAction,
+    GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT, READY_TITLE, VERSION,
 };
 use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
@@ -236,8 +236,8 @@ fn main() {
 
     // 蓄積ループの状態。RAF 描画と visibilitychange ハンドラで共有する。
     // last_time: 前フレームの RAF タイムスタンプ（ms）。None は「次フレームを基準に
-    // やり直す」合図（初回・復帰直後）。acc: 未消化の実時間（秒）。
-    let acc = Rc::new(Cell::new(0.0f32));
+    // やり直す」合図（初回・復帰直後）。acc: core の Accumulator（未消化時間＋固定ステップ消化）。
+    let acc = Rc::new(RefCell::new(Accumulator::new()));
     let last_time = Rc::new(Cell::new(None::<f64>));
 
     // visibilitychange: 非表示→復帰の一発死防止。背景タブでは RAF 自体が止まるため、
@@ -246,7 +246,7 @@ fn main() {
         let acc = acc.clone();
         let last_time = last_time.clone();
         EventListener::new(&document, "visibilitychange", move |_event| {
-            acc.set(0.0);
+            *acc.borrow_mut() = Accumulator::new();
             last_time.set(None);
         })
         .forget();
@@ -258,18 +258,18 @@ fn main() {
     let f: Rc<RefCell<Option<RafCallback>>> = Rc::new(RefCell::new(None));
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::wrap(Box::new(move |time: f64| {
-        if let Some(last) = last_time.get() {
-            // 1 フレーム上限 0.10s（描画ヒッチ・復帰時の spiral of death を防ぐ安全網）。
-            let dt = ((time - last) / 1000.0) as f32;
-            acc.set(acc.get() + dt.min(0.10));
-        }
+        // 実経過時間を core の Accumulator に渡し、消化すべき tick 数を得る。
+        // MAX_FRAME_DT クランプ（spiral of death 防止）と固定ステップ消化は core が単一ソース（#139）。
+        let ticks = match last_time.get() {
+            Some(last) => acc.borrow_mut().advance(((time - last) / 1000.0) as f32),
+            None => 0, // 初回・復帰直後は基準フレームを置くだけ（tick しない）。
+        };
         last_time.set(Some(time));
 
         {
             let mut game = game.borrow_mut();
-            while acc.get() >= DT {
+            for _ in 0..ticks {
                 game.tick();
-                acc.set(acc.get() - DT);
             }
         }
 
