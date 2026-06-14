@@ -14,7 +14,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use flappy_core::{
-    pipe_blocks_row, primary_action, Accumulator, Config, Game, Phase, PrimaryAction,
+    layout, pipe_blocks_row, primary_action, Accumulator, Config, Game, Phase, PrimaryAction,
     GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT, READY_TITLE, VERSION,
 };
 use gloo_events::{EventListener, EventListenerOptions};
@@ -108,13 +108,15 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     let _ = ctx.arc(cx, cy, r, 0.0, std::f64::consts::PI * 2.0);
     ctx.fill();
 
-    // HUD（最上行）: 左 SCORE、右 BEST。
+    // HUD（最上行）: 左 SCORE、右 BEST。行/列は core の layout（term と同一インデックス）。
+    // baseline=middle 由来の +0.5 セルは web 各自で加算する（#141）。
     ctx.set_fill_style_str(COLOR_TEXT);
     ctx.set_font("16px monospace");
     ctx.set_text_baseline("middle");
-    let hud_y = cell * 0.5;
+    let hud_y = (layout::HUD_ROW as f64 + 0.5) * cell;
     ctx.set_text_align("left");
-    let _ = ctx.fill_text(&format!("SCORE {}", game.score()), cell, hud_y);
+    let score_x = layout::HUD_SCORE_COL as f64 * cell;
+    let _ = ctx.fill_text(&format!("SCORE {}", game.score()), score_x, hud_y);
     ctx.set_text_align("right");
     let _ = ctx.fill_text(&format!("BEST {}", game.best()), w - cell, hud_y);
 
@@ -130,31 +132,49 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     ctx.set_text_align("center");
     match game.phase() {
         Phase::Ready => {
+            // 行は core の layout（term と同一インデックス）。+0.5 は baseline=middle 由来（#141）。
             ctx.set_font("bold 32px monospace");
-            let _ = ctx.fill_text(READY_TITLE, w / 2.0, 3.5 * cell);
+            let _ = ctx.fill_text(
+                READY_TITLE,
+                w / 2.0,
+                (layout::READY_TITLE_ROW as f64 + 0.5) * cell,
+            );
             ctx.set_font("16px monospace");
-            let _ = ctx.fill_text(READY_HINT, w / 2.0, 8.5 * cell);
+            let _ = ctx.fill_text(
+                READY_HINT,
+                w / 2.0,
+                (layout::READY_HINT_ROW as f64 + 0.5) * cell,
+            );
         }
         Phase::GameOver => {
             // 罫線ボックス相当の枠（#76: term の draw_gameover_box と同じ行・同じ幅）。
             // term はボックス文字で背面の棒を隠すため、web も内側を背景色で塗ってから枠線を引く。
+            // 上端/高さ/内部行は core の layout（term と同一インデックス。#141）。
             let box_w_cells = (GAMEOVER_RETRY_HINT.chars().count() + 2) as f64; // 罫線込み幅（セル）
+            let top = layout::GAMEOVER_BOX_TOP as f64;
             let bx = ((cols as f64 - box_w_cells) / 2.0).floor() * cell;
-            let by = 2.0 * cell;
-            let (bw, bh) = (box_w_cells * cell, 6.0 * cell);
+            let by = top * cell;
+            let (bw, bh) = (
+                box_w_cells * cell,
+                layout::GAMEOVER_BOX_HEIGHT as f64 * cell,
+            );
             ctx.set_fill_style_str(COLOR_BG);
             ctx.fill_rect(bx, by, bw, bh);
             ctx.set_stroke_style_str(COLOR_TEXT);
             ctx.stroke_rect(bx, by, bw, bh);
-            // 文言は core の定数（term と同一ソース）。行位置も term のボックス内行に合わせ、
-            // x は枠の中心（キャンバス中心とは 0.5 セルずれる）に揃える。
+            // 文言は core の定数（term と同一ソース）。行位置も term のボックス内行（top+1/+2/+3）に合わせ、
+            // +0.5 は baseline=middle 由来。x は枠の中心（キャンバス中心とは 0.5 セルずれる）に揃える。
             let box_cx = bx + bw / 2.0;
             ctx.set_fill_style_str(COLOR_TEXT);
             ctx.set_font("bold 16px monospace");
-            let _ = ctx.fill_text(GAMEOVER_TITLE, box_cx, 3.5 * cell);
+            let _ = ctx.fill_text(GAMEOVER_TITLE, box_cx, (top + 1.5) * cell);
             ctx.set_font("16px monospace");
-            let _ = ctx.fill_text(&format!("SCORE {}", game.score()), box_cx, 4.5 * cell);
-            let _ = ctx.fill_text(GAMEOVER_RETRY_HINT, box_cx, 5.5 * cell);
+            let _ = ctx.fill_text(
+                &format!("SCORE {}", game.score()),
+                box_cx,
+                (top + 2.5) * cell,
+            );
+            let _ = ctx.fill_text(GAMEOVER_RETRY_HINT, box_cx, (top + 3.5) * cell);
             // 「q : quit」行は term のみ（web に終了概念がないため。DESIGN §2 の許容差）。
         }
         Phase::Playing => {}
