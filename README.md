@@ -35,6 +35,15 @@
 
 ## インストール
 
+### Homebrew（ターミナル版・macOS / Linux）
+
+[`astail/homebrew-tap`](https://github.com/astail/homebrew-tap) から導入する。インストール後のコマンド名は `flappy-cli`。
+
+```bash
+brew install astail/tap/flappy-cli
+flappy-cli
+```
+
 ### バイナリリリース（ターミナル版）
 
 [Releases](https://github.com/astail/flappy-cli/releases) から各プラットフォーム向けの `flappy-<version>-<target>.tar.gz` を取得して展開する。
