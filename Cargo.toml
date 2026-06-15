@@ -8,4 +8,4 @@ exclude = ["crates/web"]
 # member（core / term）が version.workspace = true で継承する単一ソース。
 # web は独立 workspace のため継承できず、自身の Cargo.toml で個別に持つ。
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
