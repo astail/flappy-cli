@@ -147,6 +147,10 @@ pub struct Pipe {
     pub x: f32,
     pub gap_top: u16,
     pub passed: bool,
+    /// この棒がコース（`with_course` の gap_top 列）の何番目から生成されたか。
+    /// レンダラが「どの行の文字でこの棒を描くか」を引くのに使う（term `--cmd`）。
+    /// 乱数モード（course 空）では常に 0。
+    pub course_idx: usize,
 }
 
 /// 棒が指定 `row`（行）を塞ぐか。**描画（棒セル）と衝突判定で共有する単一定義**。
@@ -172,10 +176,23 @@ pub struct Game {
     dist_to_next: f32,
     score: u32,
     best: u32,
+    /// 棒の gap_top 列（term `--cmd`）。空なら rng で抽選、非空なら順に（尽きたら先頭へ）消費する。
+    course: Vec<u16>,
+    /// course の次に読む位置（reset で 0 に戻り、毎プレイ先頭から再生する）。
+    course_pos: usize,
 }
 
 impl Game {
     pub fn new(cfg: Config, seed: u64) -> Self {
+        // course 空 = 従来の rng 抽選経路。
+        Self::with_course(cfg, seed, Vec::new())
+    }
+
+    /// 棒の `gap_top` 列（course）を外から与えて Game を作る（term の `--cmd` 用）。
+    /// `course` が非空なら `spawn_pipe` は rng でなくこの列を順に（尽きたら先頭へループ）消費する。
+    /// 各値は `[1, rows-1-pipe_gap]` にクランプされるため範囲外を渡しても安全。
+    /// `course` が空なら [`Game::new`] と完全に同一（rng 抽選）。
+    pub fn with_course(cfg: Config, seed: u64, course: Vec<u16>) -> Self {
         // 1 フレーム 1 セル以内を保証する不変条件（スイープ判定を不要にする）。
         assert!(
             cfg.scroll_speed * DT < 1.0 && cfg.vy_max * DT < 1.0,
@@ -198,30 +215,41 @@ impl Game {
             dist_to_next: 0.0,
             score: 0,
             best: 0,
+            course,
+            course_pos: 0,
         };
         game.reset_play_state();
         game
     }
 
-    /// gap_top を抽選し、右端（x = cols）に未通過の Pipe を 1 本生成する。
-    /// gap_top の抽選範囲 `[1, rows - 1 - pipe_gap]` はここが単一ソース（new / tick / restart 共通）。
+    /// gap_top を決め、右端（x = cols）に未通過の Pipe を 1 本生成する。
+    /// gap_top の範囲 `[1, rows - 1 - pipe_gap]` はここが単一ソース（new / tick / restart 共通）。
+    /// course 非空ならその列を順に消費（尽きたら先頭へループ）し範囲内へクランプ、空なら rng で抽選。
     fn spawn_pipe(&mut self) -> Pipe {
-        let gap_top = self
-            .rng
-            .gen_range_inclusive(1, self.cfg.rows - 1 - self.cfg.pipe_gap);
+        let hi = self.cfg.rows - 1 - self.cfg.pipe_gap;
+        let (gap_top, course_idx) = if self.course.is_empty() {
+            (self.rng.gen_range_inclusive(1, hi), 0)
+        } else {
+            let idx = self.course_pos % self.course.len();
+            self.course_pos += 1;
+            (self.course[idx].clamp(1, hi), idx)
+        };
         Pipe {
             x: self.cfg.cols as f32,
             gap_top,
             passed: false,
+            course_idx,
         }
     }
 
     /// プレイ開始状態へ初期化する（new / restart 共通）。`best` と rng ストリームは touch しない。
     /// 鳥を画面中央付近へ、最初の棒を右端に 1 本（鳥に届くまで約 1 画面ぶんの助走で開始即死を防ぐ）、
     /// `dist_to_next` を spacing に、phase を Ready、score を 0 にする。
+    /// course モードでは `course_pos` を 0 に戻し、リスタートのたびに同じコースを先頭から再生する。
     fn reset_play_state(&mut self) {
         self.bird_y = self.cfg.rows as f32 / 2.0;
         self.bird_vy = 0.0;
+        self.course_pos = 0;
         let pipe = self.spawn_pipe();
         self.pipes = vec![pipe];
         self.dist_to_next = self.cfg.pipe_spacing;
@@ -719,6 +747,58 @@ mod tests {
             actual, expected,
             "restart must continue the rng stream, not re-seed"
         );
+    }
+
+    #[test]
+    fn with_course_cycles_gap_tops_and_tags_index() {
+        // course を順に消費し、尽きたら先頭へループする。各 Pipe.course_idx も対応する。
+        let course = vec![3u16, 9, 15];
+        let mut g = Game::with_course(Config::default(), 1, course);
+        // reset_play_state が 1 本目（course[0]）を生成済み。
+        let mut got = vec![(g.pipes()[0].gap_top, g.pipes()[0].course_idx)];
+        for _ in 0..5 {
+            let p = g.spawn_pipe();
+            got.push((p.gap_top, p.course_idx));
+        }
+        assert_eq!(
+            got,
+            vec![(3, 0), (9, 1), (15, 2), (3, 0), (9, 1), (15, 2)],
+            "course must cycle in order with matching course_idx"
+        );
+    }
+
+    #[test]
+    fn with_course_clamps_gap_top_into_range() {
+        // 範囲外の gap_top を渡してもクランプされ、棒が画面内（[1, rows-1-pipe_gap]）に収まる。
+        let cfg = Config::default();
+        let hi = cfg.rows - 1 - cfg.pipe_gap; // 17
+        let mut g = Game::with_course(Config::default(), 1, vec![0u16, 99, 5]);
+        assert_eq!(g.pipes()[0].gap_top, 1, "0 must clamp up to 1");
+        assert_eq!(g.spawn_pipe().gap_top, hi, "99 must clamp down to hi");
+        assert_eq!(g.spawn_pipe().gap_top, 5, "in-range value passes through");
+    }
+
+    #[test]
+    fn restart_replays_course_from_top() {
+        // restart で course_pos が 0 に戻り、1 本目が course[0] に戻る（毎プレイ同じコース）。
+        let mut g = Game::with_course(Config::default(), 1, vec![7u16, 2, 14]);
+        assert_eq!(g.pipes()[0].gap_top, 7);
+        // 何本か spawn して course_pos を進めてから restart。
+        let _ = g.spawn_pipe();
+        let _ = g.spawn_pipe();
+        g.restart();
+        assert_eq!(g.pipes().len(), 1);
+        assert_eq!(g.pipes()[0].gap_top, 7, "restart replays course[0]");
+        assert_eq!(g.pipes()[0].course_idx, 0);
+    }
+
+    #[test]
+    fn empty_course_uses_rng_path() {
+        // course 空 = 従来の rng 経路。同一 seed で gap_top 列が一致し course_idx は 0 のまま。
+        let a = Game::with_course(Config::default(), 55, Vec::new());
+        let b = Game::new(Config::default(), 55);
+        assert_eq!(a.pipes()[0].gap_top, b.pipes()[0].gap_top);
+        assert_eq!(a.pipes()[0].course_idx, 0);
     }
 
     #[test]

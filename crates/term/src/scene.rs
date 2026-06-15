@@ -87,18 +87,46 @@ fn place_at(chars: &mut [char], paint: &mut [Paint], text: &str, start: usize) {
 }
 
 /// 既知状態の core を 1 フレームへ変換する。
-pub fn render(game: &Game) -> Frame {
+///
+/// `course_lines` が `None`（通常）なら棒を Braille サブセルで描く。`Some(lines)`（term の
+/// `--cmd` モード）なら棒を「その行の文字を縦に敷き詰めた文字壁」で描く（`lines[course_idx]`）。
+/// 鳥・HUD・天井/地面ライン・メッセージは [`overlay_text`] で両モード共通に上書きする。
+pub fn render(game: &Game, course_lines: Option<&[String]>) -> Frame {
     let cfg = game.config();
     let (cols, rows) = (cfg.cols as usize, cfg.rows as usize);
 
-    // ドットビットマップ（rows*4 × cols*2）。動く要素（棒）をここに点で打つ。
+    let mut chars = vec![vec![' '; cols]; rows];
+    let mut paint = vec![vec![Paint::None; cols]; rows];
+
+    match course_lines {
+        None => render_pipes_braille(game, &mut chars, &mut paint, cols, rows),
+        Some(lines) => render_pipes_text(game, lines, &mut chars, &mut paint, cols, rows),
+    }
+
+    // 鳥は Braille ブロブではなく ● の 1 文字で描く（overlay_text 参照。web の塗り円と
+    // 見た目を揃える。GameOver の ✕ も同様に文字で描く）。テキストレイヤーで上書き。
+    overlay_text(game, &mut chars, &mut paint, cfg.cols, cfg.rows);
+
+    Frame { chars, paint }
+}
+
+/// 棒を Braille サブセル（1 セル = 横2×縦4 ドット）で描く（通常モード。web と見た目を揃える）。
+///
+/// dot-x = round(x*2) から幅 2 ドット（=1 セル幅）。塞ぐセル行の dot-y 4 本を立てる。
+/// 横は dot 解像度（既知の制約: 衝突は round(p.x) の 1 セルで判定されるため視覚との差は
+/// 最大 1/4 セル。描画セルは衝突セル round(p.x) を常に含むので「触れて見えないのに死ぬ」
+/// ことはなく、ずれは「触れて見えても生きている」側にだけ倒れる）。
+fn render_pipes_braille(
+    game: &Game,
+    chars: &mut [Vec<char>],
+    paint: &mut [Vec<Paint>],
+    cols: usize,
+    rows: usize,
+) {
+    let cfg = game.config();
     let dot_w = cols * 2;
     let mut dots = vec![vec![false; dot_w]; rows * 4];
 
-    // 棒: dot-x = round(x*2) から幅 2 ドット（=1 セル幅）。塞ぐセル行の dot-y 4 本を立てる。
-    // 横は dot 解像度（既知の制約: 衝突は round(p.x) の 1 セルで判定されるため視覚との差は
-    // 最大 1/4 セル。描画セルは衝突セル round(p.x) を常に含むので「触れて見えないのに死ぬ」
-    // ことはなく、ずれは「触れて見えても生きている」側にだけ倒れる）。
     for p in game.pipes() {
         let dx0 = (p.x * 2.0).round() as i32;
         for dx in [dx0, dx0 + 1] {
@@ -115,12 +143,7 @@ pub fn render(game: &Game) -> Frame {
         }
     }
 
-    // 鳥は Braille ブロブではなく ● の 1 文字で描く（overlay_text 参照。web の塗り円と
-    // 見た目を揃える。GameOver の ✕ も同様に文字で描く）。
-
     // ドットを 2×4 ブロックごとに Braille へパック。立っているセルに塗り分けを付ける。
-    let mut chars = vec![vec![' '; cols]; rows];
-    let mut paint = vec![vec![Paint::None; cols]; rows];
     for r in 0..rows {
         for c in 0..cols {
             let mut mask = 0u8;
@@ -131,18 +154,53 @@ pub fn render(game: &Game) -> Frame {
                     }
                 }
             }
-            chars[r][c] = braille(mask);
             if mask != 0 {
                 // dots に立つのは棒だけ（鳥は overlay_text で ● 描画）なので常に Pipe。
+                chars[r][c] = braille(mask);
                 paint[r][c] = Paint::Pipe;
             }
         }
     }
+}
 
-    // テキストレイヤーを文字で上書き（paint は None に戻す）。
-    overlay_text(game, &mut chars, &mut paint, cfg.cols, cfg.rows);
-
-    Frame { chars, paint }
+/// 棒を「その行の文字を縦に敷き詰めた文字壁」で描く（term の `--cmd` モード専用）。
+///
+/// 棒が塞ぐ各行に、その棒由来の行（`Pipe.course_idx` → `lines[idx]`）の文字を 1 つ置く。
+/// 行が棒より短ければ繰り返す。行の文字が画面全体を縦に走り、隙間（穴）だけ抜けたように見える。
+/// 横位置は衝突と同じ `round(p.x)` の 1 セル（Braille の 1/2 セル平滑は course 時は無し。
+/// 衝突も `round(p.x)` なので見た目と判定はセル単位で一致する）。
+fn render_pipes_text(
+    game: &Game,
+    lines: &[String],
+    chars: &mut [Vec<char>],
+    paint: &mut [Vec<Paint>],
+    cols: usize,
+    rows: usize,
+) {
+    // `render` の pub 引数として `Some(&[])` を受け取りうるため、後段 `% lines.len()` の
+    // 0 除算を防ぐ境界ガード（実プレイでは main の course_lines_or_exit が 0 行を exit 2 で弾く）。
+    if lines.is_empty() {
+        return;
+    }
+    let cfg = game.config();
+    for p in game.pipes() {
+        let col = p.x.round() as i32;
+        if col < 0 || col as usize >= cols {
+            continue;
+        }
+        let glyphs: Vec<char> = lines[p.course_idx % lines.len()].chars().collect();
+        if glyphs.is_empty() {
+            continue;
+        }
+        for row in 1..rows as i32 {
+            if pipe_blocks_row(p.gap_top, cfg.pipe_gap, cfg.rows, row) {
+                // row は塞ぐ範囲なので必ず >= 1。row-1 を行内オフセットとし、穴を挟んでも
+                // 文字列が縦に通って見えるよう row から直接 index を引く（cycle で埋める）。
+                chars[row as usize][col as usize] = glyphs[(row as usize - 1) % glyphs.len()];
+                paint[row as usize][col as usize] = Paint::Pipe;
+            }
+        }
+    }
 }
 
 /// テキストレイヤー（天井・地面ライン / HUD / メッセージ / GameOver ボックス / 死亡鳥）を上書きする。
@@ -223,7 +281,7 @@ fn overlay_text(
 /// 既知状態の core を 1 フレームの文字グリッドへ変換する（プレーンテキスト、テスト/ゴールデン用）。
 #[cfg(test)]
 pub fn scene_to_string(game: &Game) -> String {
-    render(game).to_text()
+    render(game, None).to_text()
 }
 
 /// GameOver の罫線ボックスを中央へ描く（内側幅 = 最長行の retry 案内に合わせる）。
@@ -367,7 +425,7 @@ mod tests {
             }
             g.tick();
             // 棒セル（paint==Pipe）が存在すれば成功。
-            let frame = render(&g);
+            let frame = render(&g, None);
             if frame.paint.iter().flatten().any(|p| *p == Paint::Pipe) {
                 found = true;
                 break;
@@ -416,7 +474,7 @@ mod tests {
             }
         }
         assert_eq!(g.phase(), Phase::GameOver);
-        let frame = render(&g);
+        let frame = render(&g, None);
         assert!(
             frame.paint.iter().flatten().any(|p| *p == Paint::BirdDead),
             "dead bird cell should be tagged Paint::BirdDead"
@@ -442,7 +500,7 @@ mod tests {
             0,
             "ceiling death clamps bird_cell row to 0"
         );
-        let frame = render(&g);
+        let frame = render(&g, None);
         assert!(
             !frame.chars[0].contains(&BIRD_DEAD),
             "death marker must not land on row 0 (ceiling line / HUD)"
@@ -473,7 +531,7 @@ mod tests {
             if g.phase() != Phase::Playing {
                 break;
             }
-            let frame = render(&g);
+            let frame = render(&g, None);
             let row = g.bird_cell().1.max(1) as usize;
             assert_eq!(
                 frame.chars[row][12], BIRD,
@@ -483,6 +541,108 @@ mod tests {
             let bird_count = frame.chars.iter().flatten().filter(|&&c| c == BIRD).count();
             assert_eq!(bird_count, 1, "exactly one ● should be drawn");
         }
+    }
+
+    #[test]
+    fn course_mode_draws_text_wall_with_gap() {
+        // --cmd モード: 棒セルに行の文字（cycle）が出て、穴 [gap_top, gap_top+gap) は空白。
+        // Braille 棒（U+2800..U+28FF）は出ない。
+        let cfg = Config::default();
+        let lines = vec!["abcdef".to_string(), "XYZ".to_string()];
+        // 1 本目 gap_top=10, course_idx 0 → "abcdef"。
+        let mut g = Game::with_course(Config::default(), 1, vec![10u16, 5]);
+        g.flap();
+        let center = Config::default().rows / 2;
+        // 1 本目が画面内（col<=50）に来るまで hover で進める（この時点では棒は 1 本）。
+        for _ in 0..200 {
+            if g.bird_cell().1 >= center {
+                g.flap();
+            }
+            g.tick();
+            if g.pipes()[0].x.round() as usize <= 50 {
+                break;
+            }
+        }
+        let p = &g.pipes()[0];
+        assert_eq!(p.course_idx, 0);
+        let col = p.x.round() as usize;
+        let gap_top = p.gap_top;
+        assert_ne!(col, 12, "test assumes pipe column differs from bird column");
+
+        let frame = render(&g, Some(&lines));
+        let glyphs: Vec<char> = "abcdef".chars().collect();
+        for row in 1..(cfg.rows as i32 - 1) {
+            let cell = frame.chars[row as usize][col];
+            if pipe_blocks_row(gap_top, cfg.pipe_gap, cfg.rows, row) {
+                assert_eq!(
+                    cell,
+                    glyphs[(row as usize - 1) % glyphs.len()],
+                    "row {row}: wall must show the line's char (cycled)"
+                );
+                assert!(
+                    frame.paint[row as usize][col] == Paint::Pipe,
+                    "row {row}: wall cell must be Paint::Pipe"
+                );
+            } else {
+                assert_eq!(cell, ' ', "row {row}: gap must be blank");
+            }
+        }
+        assert!(
+            !frame
+                .chars
+                .iter()
+                .flatten()
+                .any(|&c| ('\u{2800}'..='\u{28FF}').contains(&c)),
+            "course mode must not render Braille pipes"
+        );
+    }
+
+    #[test]
+    fn course_mode_cycles_lines_across_pipes() {
+        // 複数の棒が同時に画面内に出るとき、各棒が course_idx に応じて別の行の文字を描く
+        // （course[0]→lines[0]="A...", course[1]→lines[1]="B..."）。cycle 選択の統合検証。
+        let cfg = Config::default();
+        let lines = vec!["AAAAAAAA".to_string(), "BBBBBBBB".to_string()];
+        // gap_top 9/10 はどちらも中央行(12)を含む隙間 → hover で生き延び 2 本目まで出せる。
+        let mut g = Game::with_course(Config::default(), 1, vec![9u16, 10]);
+        g.flap();
+        let center = cfg.rows / 2;
+        let mut idx0_col = None;
+        let mut idx1_col = None;
+        for _ in 0..400 {
+            if g.bird_cell().1 >= center {
+                g.flap();
+            }
+            g.tick();
+            if g.phase() != Phase::Playing {
+                break;
+            }
+            // 画面内の棒を course_idx 別に拾う（同 idx が複数あれば最後のもの）。
+            idx0_col = None;
+            idx1_col = None;
+            for p in g.pipes() {
+                let col = p.x.round();
+                if col < 0.0 || col as usize >= cfg.cols as usize {
+                    continue;
+                }
+                match p.course_idx {
+                    0 => idx0_col = Some(col as usize),
+                    1 => idx1_col = Some(col as usize),
+                    _ => {}
+                }
+            }
+            if idx0_col.is_some() && idx1_col.is_some() {
+                break;
+            }
+        }
+        let c0 = idx0_col.expect("a pipe from lines[0] should be on screen");
+        let c1 = idx1_col.expect("a pipe from lines[1] should be on screen");
+        assert_ne!(c0, c1, "the two pipes must occupy different columns");
+
+        // row 1 は gap_top(9/10) の上＝必ず塞ぐ行。各棒が対応する行の先頭文字を描く。
+        let frame = render(&g, Some(&lines));
+        assert_eq!(frame.chars[1][c0], 'A', "lines[0] pipe must render 'A'");
+        assert_eq!(frame.chars[1][c1], 'B', "lines[1] pipe must render 'B'");
     }
 
     #[test]
