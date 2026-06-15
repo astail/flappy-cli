@@ -44,6 +44,13 @@ brew install astail/tap/flappy-cli
 flappy-cli
 ```
 
+新しいバージョンへ更新するとき:
+
+```bash
+brew update
+brew upgrade flappy-cli
+```
+
 ### バイナリリリース（ターミナル版）
 
 [Releases](https://github.com/astail/flappy-cli/releases) から各プラットフォーム向けの `flappy-<version>-<target>.tar.gz` を取得して展開する。
