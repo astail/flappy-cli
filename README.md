@@ -33,6 +33,22 @@
 | `r` / `R` | リスタート（いつでも） |
 | `q` / `Q` / Esc | 終了（ターミナル版のみ） |
 
+## コマンドラインオプション（ターミナル版）
+
+ターミナル版は以下のオプションを受け付ける（`flappy --help` でも確認できる）。
+
+| オプション | 動作 |
+|---|---|
+| （なし） | TUI でプレイ |
+| `--cmd "<command>"` | コマンド出力（stdout）の各行を縦の「文字壁」にしてコースにする（例: `flappy --cmd "ls -la"`）。`--headless` とは併用しない |
+| `--headless [--seed S] [--frames N]` | TTY 不要の決定論 autopilot で N フレーム実行し、最終スコアを stdout に出力（既定 `S=1` / `N=600`） |
+| `-h`, `--help` | ヘルプを表示して終了 |
+| `-V`, `--version` | バージョンを表示して終了 |
+
+> コマンド名は導入方法で異なる。Homebrew 版は `flappy-cli`、バイナリリリース版は `flappy`、ソースからは `cargo run -p flappy-term -- <オプション>`。上の例は `flappy` 表記。
+>
+> `--cmd`（文字壁コースの描き方・隙間の決め方）の詳細は [`docs/DESIGN.md`](docs/DESIGN.md) §4 を参照。
+
 ## インストール
 
 ### Homebrew（ターミナル版・macOS / Linux）
