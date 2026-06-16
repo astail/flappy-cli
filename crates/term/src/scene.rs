@@ -14,6 +14,9 @@ use flappy_core::{
 const BIRD: char = '●';
 const BIRD_DEAD: char = '✕';
 const GROUND: char = '─';
+/// `--cmd` 文字壁で空白グリフの代わりに置くマス目（U+25A1 WHITE SQUARE）。
+/// 空白のままだと隙間（穴）と見分けが付かず「通れそうで当たる」ため、壁だと分かる文字にする。
+const CMD_WALL_BLANK: char = '□';
 
 /// 1 セルの塗り分けタグ（色は描画時に付与）。
 #[derive(Clone, Copy, PartialEq)]
@@ -196,7 +199,13 @@ fn render_pipes_text(
             if pipe_blocks_row(p.gap_top, cfg.pipe_gap, cfg.rows, row) {
                 // row は塞ぐ範囲なので必ず >= 1。row-1 を行内オフセットとし、穴を挟んでも
                 // 文字列が縦に通って見えるよう row から直接 index を引く（cycle で埋める）。
-                chars[row as usize][col as usize] = glyphs[(row as usize - 1) % glyphs.len()];
+                // 衝突判定は文字に依存せず塞ぐので、空白グリフは穴と紛れないよう □ に置換する。
+                let glyph = glyphs[(row as usize - 1) % glyphs.len()];
+                chars[row as usize][col as usize] = if glyph.is_whitespace() {
+                    CMD_WALL_BLANK
+                } else {
+                    glyph
+                };
                 paint[row as usize][col as usize] = Paint::Pipe;
             }
         }
@@ -643,6 +652,53 @@ mod tests {
         let frame = render(&g, Some(&lines));
         assert_eq!(frame.chars[1][c0], 'A', "lines[0] pipe must render 'A'");
         assert_eq!(frame.chars[1][c1], 'B', "lines[1] pipe must render 'B'");
+    }
+
+    #[test]
+    fn course_mode_renders_blank_glyph_as_square() {
+        // --cmd モード: 行内の空白グリフは壁では □(U+25A1) になり、穴（隙間）と見分けが付く。
+        // 一方、穴の行は従来どおり空白のまま（□ にしない）＝「通れそうで当たる」の解消。
+        let cfg = Config::default();
+        let lines = vec!["a b".to_string()]; // glyphs: ['a', ' ', 'b']
+        let mut g = Game::with_course(Config::default(), 1, vec![10u16, 5]);
+        g.flap();
+        let center = cfg.rows / 2;
+        for _ in 0..200 {
+            if g.bird_cell().1 >= center {
+                g.flap();
+            }
+            g.tick();
+            if g.pipes()[0].x.round() as usize <= 50 {
+                break;
+            }
+        }
+        let p = &g.pipes()[0];
+        assert_eq!(p.course_idx, 0);
+        let col = p.x.round() as usize;
+        let gap_top = p.gap_top;
+
+        let frame = render(&g, Some(&lines));
+        let glyphs: Vec<char> = "a b".chars().collect();
+        let mut saw_square = false;
+        for row in 1..(cfg.rows as i32 - 1) {
+            let cell = frame.chars[row as usize][col];
+            if pipe_blocks_row(gap_top, cfg.pipe_gap, cfg.rows, row) {
+                let src = glyphs[(row as usize - 1) % glyphs.len()];
+                if src == ' ' {
+                    assert_eq!(cell, '□', "row {row}: blank glyph must render as □");
+                    saw_square = true;
+                } else {
+                    assert_eq!(cell, src, "row {row}: non-blank glyph unchanged");
+                }
+                assert_ne!(cell, ' ', "row {row}: wall cell must never look blank");
+            } else {
+                assert_eq!(cell, ' ', "row {row}: gap must stay blank (not □)");
+            }
+        }
+        assert!(
+            saw_square,
+            "test must exercise at least one blank-glyph wall cell"
+        );
     }
 
     #[test]
