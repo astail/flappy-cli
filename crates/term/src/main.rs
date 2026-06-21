@@ -148,6 +148,8 @@ USAGE:
     flappy                                   TUI でプレイ
     flappy --cmd \"<command>\"                 コマンド出力の各行を縦の「文字壁」にして
                                              コースにする（例: flappy --cmd \"ls -la\"）
+    flappy --speedup                         スコアが上がるほど横スクロールが速くなる
+                                             モード（--cmd と併用可。無指定は一定速度）
     flappy --headless [--seed S] [--frames N]
                                              決定論 autopilot で N フレーム実行し
                                              最終スコアを stdout に出力（既定 S=1, N=600）
@@ -211,11 +213,15 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
+    // --speedup: score に応じてスクロール速度が上がる（既定無指定は従来どおり一定）。
+    // 数値（step/cap）は core の Config::with_speedup が単一ソース。
+    let speedup = args.iter().any(|a| a == "--speedup");
+
     // headless モード: TTY 不要・端末ガード非経由で N フレーム自動実行しスコアを stdout 出力。
     if args.iter().any(|a| a == "--headless") {
         let seed = parse_flag_or_exit(&args, "--seed", 1);
         let frames = parse_flag_or_exit(&args, "--frames", 600);
-        println!("{}", headless::run_headless(seed, frames));
+        println!("{}", headless::run_headless(seed, frames, speedup));
         return Ok(());
     }
 
@@ -233,13 +239,21 @@ fn main() -> io::Result<()> {
 
     let _guard = TerminalGuard::enter()?;
 
+    // speedup 時は core 由来の Config::with_speedup を使う（--cmd 経路にも効かせる）。
+    let make_cfg = || {
+        if speedup {
+            Config::default().with_speedup()
+        } else {
+            Config::default()
+        }
+    };
     let seed = seed_from_clock();
     let mut game = match &course_lines {
         Some(lines) => {
             let course = course::build_course(lines, &Config::default());
-            Game::with_course(Config::default(), seed, course)
+            Game::with_course(make_cfg(), seed, course)
         }
-        None => Game::new(Config::default(), seed),
+        None => Game::new(make_cfg(), seed),
     };
     let grid = (Config::default().cols, Config::default().rows);
 

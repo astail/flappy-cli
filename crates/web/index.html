@@ -32,9 +32,38 @@
         max-height: 100vh;
         max-height: 100dvh;
       }
+      /* スピードアップ切替（?speedup=1 を付けて読み直すだけ。canvas 外なので画面パリティ不変）。 */
+      #speedup-toggle {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        font: 14px monospace;
+        color: #333;
+        background: rgba(232, 244, 248, 0.85);
+        padding: 4px 8px;
+        border-radius: 6px;
+        user-select: none;
+      }
     </style>
   </head>
   <body>
     <canvas id="canvas"></canvas>
+    <label id="speedup-toggle">
+      <input type="checkbox" id="speedup" /> スピードアップ
+    </label>
+    <!-- URL クエリ ?speedup=1 をチェックボックスで切り替えるだけの導線（手打ち不要）。
+         実際のモード判定は wasm 側が起動時に window.location.search を読む（単一ソース）。 -->
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var box = document.getElementById("speedup");
+        box.checked = params.get("speedup") === "1";
+        box.addEventListener("change", function () {
+          if (box.checked) params.set("speedup", "1");
+          else params.delete("speedup");
+          location.search = params.toString();
+        });
+      })();
+    </script>
   </body>
 </html>

@@ -88,8 +88,12 @@ pub struct Config {
     pub gravity: f32,
     /// フラップの上向き初速（負値）
     pub flap_impulse: f32,
-    /// スクロール速度（列/秒）
+    /// スクロール速度（列/秒）。スピードアップ時の初速（base）でもある。
     pub scroll_speed: f32,
+    /// スコア 1 本あたりのスクロール速度上昇量（列/秒）。既定 0.0 = 上昇なし（後方互換）。
+    pub scroll_speed_step: f32,
+    /// スクロール速度の上限（列/秒）。既定は `scroll_speed`（= 上昇なし）。
+    pub scroll_speed_max: f32,
     /// 隙間の縦幅（行）
     pub pipe_gap: u16,
     /// 棒の間隔（列）
@@ -107,9 +111,27 @@ impl Default for Config {
             gravity: 45.0,
             flap_impulse: -16.0,
             scroll_speed: 12.0,
+            // 既定は実質オフ: step=0・max=scroll_speed なので実効速度は常に scroll_speed（一定）。
+            scroll_speed_step: 0.0,
+            scroll_speed_max: 12.0,
             pipe_gap: 6,
             pipe_spacing: 22.0,
             vy_max: 30.0,
+        }
+    }
+}
+
+impl Config {
+    /// スピードアップモードの Config を返す（`--speedup` / `?speedup=1`）。
+    /// score に応じてスクロール速度が `scroll_speed_step` ずつ上がり `scroll_speed_max` で
+    /// クランプする。term/web の drift を防ぐため step / cap の数値はここが唯一のソース。
+    /// cap は不変条件（`scroll_speed_max × DT < 1.0` → < 60 列/秒）の範囲に収め、衝突は
+    /// 従来の離散等値判定のまま据え置く（DESIGN §7）。
+    pub fn with_speedup(self) -> Self {
+        Self {
+            scroll_speed_step: 1.5,
+            scroll_speed_max: 30.0,
+            ..self
         }
     }
 }
@@ -194,8 +216,10 @@ impl Game {
     /// `course` が空なら [`Game::new`] と完全に同一（rng 抽選）。
     pub fn with_course(cfg: Config, seed: u64, course: Vec<u16>) -> Self {
         // 1 フレーム 1 セル以内を保証する不変条件（スイープ判定を不要にする）。
+        // scroll_speed_max も含めることで、speedup の ramp が上限に達しても 1 セル/フレームを
+        // 割る保証になる（cap ≥ 60 の Config は構築時に panic で弾く）。
         assert!(
-            cfg.scroll_speed * DT < 1.0 && cfg.vy_max * DT < 1.0,
+            cfg.scroll_speed * DT < 1.0 && cfg.scroll_speed_max * DT < 1.0 && cfg.vy_max * DT < 1.0,
             "config violates per-frame 1-cell invariant"
         );
         // gap_top の抽選範囲 [1, rows - 1 - pipe_gap] が空にならないことを保証する。
@@ -285,6 +309,15 @@ impl Game {
         self.bird_y.round() as i32
     }
 
+    /// 現在のスコアに応じた実効スクロール速度（列/秒）。`scroll_speed + step * score` を
+    /// `scroll_speed_max` でクランプする。既定 Config（step=0・max=scroll_speed）では常に
+    /// `scroll_speed` で一定（後方互換）。決定論ガードレール遵守: f32 の加算・乗算・`min` と
+    /// `as f32` キャストのみ（`mul_add`・transcendental は使わない）。
+    fn current_scroll_speed(&self) -> f32 {
+        (self.cfg.scroll_speed + self.cfg.scroll_speed_step * self.score as f32)
+            .min(self.cfg.scroll_speed_max)
+    }
+
     /// 鳥の衝突セル `(col, row)`。衝突判定と同一の丸め（row は `max(0)` で天井行 0 まで許す）。
     /// 描画は天井ライン/HUD 帯（row 0）を潰さないため [`bird_display_cell`](Self::bird_display_cell)
     /// を使う（用途で使い分け。#138）。
@@ -327,7 +360,9 @@ impl Game {
         self.bird_y += self.bird_vy * DT;
 
         // 2. 全 pipe を左へスクロール、画面外（x < -1）を除去。
-        let dx = self.cfg.scroll_speed * DT;
+        //    dx は score 依存の実効速度（speedup 無効の既定では scroll_speed で一定）。
+        //    pipe の左移動と dist_to_next の減算で使い回すため、spawn 間隔も自動で追従する。
+        let dx = self.current_scroll_speed() * DT;
         for p in &mut self.pipes {
             p.x -= dx;
         }
@@ -799,6 +834,94 @@ mod tests {
         let b = Game::new(Config::default(), 55);
         assert_eq!(a.pipes()[0].gap_top, b.pipes()[0].gap_top);
         assert_eq!(a.pipes()[0].course_idx, 0);
+    }
+
+    #[test]
+    fn default_config_scroll_speed_is_constant() {
+        // 既定 Config は step=0・max=scroll_speed なので score に依らず実効速度が一定（回帰）。
+        let base = Config::default().scroll_speed;
+        let mut g = Game::new(Config::default(), 1);
+        for score in [0u32, 1, 5, 20, 1000] {
+            g.score = score;
+            assert_eq!(
+                g.current_scroll_speed(),
+                base,
+                "default config must not ramp (score={score})"
+            );
+        }
+    }
+
+    #[test]
+    fn speedup_scroll_speed_ramps_and_clamps() {
+        let cfg = Config::default().with_speedup();
+        let (base, step, cap) = (
+            cfg.scroll_speed,
+            cfg.scroll_speed_step,
+            cfg.scroll_speed_max,
+        );
+        assert!(base < cap, "ramp が意味を持つには base < cap が必要");
+        let mut g = Game::new(Config::default().with_speedup(), 1);
+        g.score = 0;
+        assert_eq!(g.current_scroll_speed(), base, "score 0 は base と一致");
+        g.score = 1;
+        assert_eq!(
+            g.current_scroll_speed(),
+            base + step,
+            "score 1 本ぶん上がる"
+        );
+        g.score = 100_000;
+        assert_eq!(g.current_scroll_speed(), cap, "cap でクランプする");
+    }
+
+    #[test]
+    #[should_panic(expected = "invariant")]
+    fn new_panics_when_scroll_speed_max_violates_invariant() {
+        // cap ≥ 60（max * DT ≥ 1.0）の Config は構築時に弾く（離散等値判定の取りこぼし防止）。
+        let cfg = Config {
+            scroll_speed_max: 72.0, // 72 * (1/60) = 1.2 >= 1.0
+            ..Config::default()
+        };
+        let _ = Game::new(cfg, 0);
+    }
+
+    #[test]
+    fn with_speedup_satisfies_invariant() {
+        // with_speedup（cap=30 < 60）は不変条件を満たし panic しない。
+        let cfg = Config::default().with_speedup();
+        assert!(cfg.scroll_speed_max * DT < 1.0);
+        let _ = Game::new(Config::default().with_speedup(), 0);
+    }
+
+    #[test]
+    fn speedup_is_deterministic() {
+        // speedup でも同一 seed・同一スクリプト入力なら gap_top 列と score が完全一致（決定論）。
+        let center = Config::default().rows / 2;
+        let mut a = Game::new(Config::default().with_speedup(), 777);
+        let mut b = Game::new(Config::default().with_speedup(), 777);
+        for _ in 0..400 {
+            for g in [&mut a, &mut b] {
+                if g.bird_cell().1 >= center {
+                    g.flap();
+                }
+                g.tick();
+            }
+        }
+        let gaps_a: Vec<u16> = a.pipes().iter().map(|p| p.gap_top).collect();
+        let gaps_b: Vec<u16> = b.pipes().iter().map(|p| p.gap_top).collect();
+        assert_eq!(a.score(), b.score(), "speedup の score は決定論的");
+        assert_eq!(gaps_a, gaps_b, "speedup の gap_top列は決定論的");
+    }
+
+    #[test]
+    fn restart_resets_speedup_to_base() {
+        // restart は score を 0 に戻すので実効速度も base に戻る（追加の状態リセット不要）。
+        let base = Config::default().with_speedup().scroll_speed;
+        let mut g = Game::new(Config::default().with_speedup(), 1);
+        g.score = 8;
+        assert!(g.current_scroll_speed() > base, "score>0 で base より速い");
+        g.restart();
+        assert_eq!(g.score(), 0);
+        assert_eq!(g.current_scroll_speed(), base, "restart で base に戻る");
     }
 
     #[test]

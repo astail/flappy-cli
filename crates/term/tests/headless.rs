@@ -34,6 +34,27 @@ fn nonzero_score() {
     assert!(s > 0, "expected non-zero score, got {s}");
 }
 
+/// (c) --speedup フラグが CLI 経路で配線されていること。同一 seed の 2 回走で一致 + 非ゼロ。
+/// 厳密なゴールデン値の検証は src 側ユニットテストに委ねる。
+#[test]
+fn speedup_flag_is_deterministic_and_nonzero() {
+    let run = || {
+        let out = Command::new(env!("CARGO_BIN_EXE_flappy"))
+            .args(["--headless", "--speedup", "--seed", "3", "--frames", "600"])
+            .output()
+            .expect("failed to run flappy");
+        assert!(out.status.success(), "flappy exited with {:?}", out.status);
+        String::from_utf8(out.stdout)
+            .expect("utf8 stdout")
+            .trim()
+            .parse::<u32>()
+            .expect("stdout must be a score integer")
+    };
+    let s = run();
+    assert!(s > 0, "expected non-zero score under --speedup, got {s}");
+    assert_eq!(s, run(), "same seed + --speedup must be deterministic");
+}
+
 /// --help / --version は TUI に入らず即終了し、それぞれ usage / バージョンを出力する。
 #[test]
 fn help_and_version_print_and_exit() {
