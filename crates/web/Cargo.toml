@@ -17,6 +17,7 @@ web-sys = { version = "0.3", features = [
     "CanvasRenderingContext2d",
     "KeyboardEvent",
     "Location",
+    "UrlSearchParams",
 ] }
 
 # crates/web は root workspace から exclude されているため独立 workspace とする。

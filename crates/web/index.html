@@ -56,8 +56,13 @@
     <script>
       (function () {
         var params = new URLSearchParams(location.search);
+        var toggle = document.getElementById("speedup-toggle");
         var box = document.getElementById("speedup");
         box.checked = params.get("speedup") === "1";
+        // 設定トグルのクリックを window の主操作 click リスナ（flap/restart）へ伝播させない。
+        toggle.addEventListener("click", function (e) {
+          e.stopPropagation();
+        });
         box.addEventListener("change", function () {
           if (box.checked) params.set("speedup", "1");
           else params.delete("speedup");

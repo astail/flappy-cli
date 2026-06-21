@@ -240,20 +240,18 @@ fn main() -> io::Result<()> {
     let _guard = TerminalGuard::enter()?;
 
     // speedup 時は core 由来の Config::with_speedup を使う（--cmd 経路にも効かせる）。
-    let make_cfg = || {
-        if speedup {
-            Config::default().with_speedup()
-        } else {
-            Config::default()
-        }
+    let cfg = if speedup {
+        Config::default().with_speedup()
+    } else {
+        Config::default()
     };
     let seed = seed_from_clock();
     let mut game = match &course_lines {
         Some(lines) => {
             let course = course::build_course(lines, &Config::default());
-            Game::with_course(make_cfg(), seed, course)
+            Game::with_course(cfg, seed, course)
         }
-        None => Game::new(make_cfg(), seed),
+        None => Game::new(cfg, seed),
     };
     let grid = (Config::default().cols, Config::default().rows);
 

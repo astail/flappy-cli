@@ -43,13 +43,15 @@ fn window() -> web_sys::Window {
 /// URL クエリ `?speedup=1` でスピードアップモードを有効化するか判定する（起動時に 1 回読む）。
 /// term の `--speedup` 起動フラグと意味論が対称（web は load 時に URL で決める）。
 /// 速度上昇のロジック・数値（step/cap）は core の `Config::with_speedup` が単一ソース。
+/// 判定は index.html のチェックボックス初期化（`new URLSearchParams(location.search).get("speedup")`）と
+/// 同一エンジン・同一意味論（最初の `speedup` の値が `"1"` か）で行い、表示と実モードのズレを防ぐ。
 fn speedup_enabled() -> bool {
     let search = window().location().search().unwrap_or_default();
-    // 先頭 '?' を除き、'&' 区切りの各 key=value を厳密に照合する（部分一致の誤検出を避ける）。
-    search
-        .trim_start_matches('?')
-        .split('&')
-        .any(|kv| kv == "speedup=1")
+    web_sys::UrlSearchParams::new_with_str(&search)
+        .ok()
+        .and_then(|p| p.get("speedup"))
+        .as_deref()
+        == Some("1")
 }
 
 fn request_animation_frame(f: &RafCallback) {
