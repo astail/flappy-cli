@@ -93,11 +93,11 @@ dependencies = [
 
 [[package]]
 name = "flappy-core"
-version = "0.7.1"
+version = "0.8.0"
 
 [[package]]
 name = "flappy-term"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "crossterm",
  "flappy-core",

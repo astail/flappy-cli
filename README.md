@@ -80,7 +80,7 @@ brew upgrade flappy-cli
 
 ```bash
 # 例: Linux x86_64
-VERSION=0.7.1
+VERSION=0.8.0
 curl -LO https://github.com/astail/flappy-cli/releases/download/v${VERSION}/flappy-${VERSION}-x86_64-unknown-linux-musl.tar.gz
 # SHA256SUMS で整合性を検証（任意）
 curl -LO https://github.com/astail/flappy-cli/releases/download/v${VERSION}/SHA256SUMS
