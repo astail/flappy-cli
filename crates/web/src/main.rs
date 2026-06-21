@@ -40,6 +40,20 @@ fn window() -> web_sys::Window {
     web_sys::window().expect("no global window")
 }
 
+/// URL クエリ `?speedup=1` でスピードアップモードを有効化するか判定する（起動時に 1 回読む）。
+/// term の `--speedup` 起動フラグと意味論が対称（web は load 時に URL で決める）。
+/// 速度上昇のロジック・数値（step/cap）は core の `Config::with_speedup` が単一ソース。
+/// 判定は index.html のチェックボックス初期化（`new URLSearchParams(location.search).get("speedup")`）と
+/// 同一エンジン・同一意味論（最初の `speedup` の値が `"1"` か）で行い、表示と実モードのズレを防ぐ。
+fn speedup_enabled() -> bool {
+    let search = window().location().search().unwrap_or_default();
+    web_sys::UrlSearchParams::new_with_str(&search)
+        .ok()
+        .and_then(|p| p.get("speedup"))
+        .as_deref()
+        == Some("1")
+}
+
 fn request_animation_frame(f: &RafCallback) {
     window()
         .request_animation_frame(f.as_ref().unchecked_ref())
@@ -195,10 +209,13 @@ fn main() {
     // canvas = 64*16 × 24*16（論理グリッドは core が一意の真実）。
     // game は RAF 描画と入力ハンドラで共有するため Rc<RefCell> で包む（JS は単一
     // スレッドなので両者の borrow は実行時に重ならない）。
-    let game = Rc::new(RefCell::new(Game::new(
-        Config::default(),
-        js_sys::Date::now() as u64,
-    )));
+    // ?speedup=1 のとき term の --speedup と同じ Config::with_speedup（core 由来＝drift なし）。
+    let cfg = if speedup_enabled() {
+        Config::default().with_speedup()
+    } else {
+        Config::default()
+    };
+    let game = Rc::new(RefCell::new(Game::new(cfg, js_sys::Date::now() as u64)));
     {
         let cfg = game.borrow();
         let cfg = cfg.config();
