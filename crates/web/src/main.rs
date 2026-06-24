@@ -153,7 +153,9 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game, auto: bool) {
     }
 
     // version（地面ライン右端に控えめに）。term の scene と同じ右下配置・単一ソース。
+    // align は明示的に right に戻す（auto バッジの center リークを打ち消す。非 auto でも no-op）。
     ctx.set_font("12px monospace");
+    ctx.set_text_align("right");
     let _ = ctx.fill_text(
         &format!("v{VERSION}"),
         w - cell * 0.5,
