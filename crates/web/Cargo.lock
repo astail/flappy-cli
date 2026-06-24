@@ -26,11 +26,11 @@ dependencies = [
 
 [[package]]
 name = "flappy-core"
-version = "0.8.0"
+version = "0.9.0"
 
 [[package]]
 name = "flappy-web"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "console_error_panic_hook",
  "flappy-core",
