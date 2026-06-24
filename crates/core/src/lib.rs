@@ -14,6 +14,11 @@ pub const DT: f32 = 1.0 / 60.0;
 /// 一気に tick して即死/カクつく「spiral of death」を防ぐ安全網。[`Accumulator`] が内蔵する。
 pub const MAX_FRAME_DT: f32 = 0.10;
 
+/// オートモード（`--auto` / `?auto=1`）で GameOver 後に自動リスタートするまでの待機秒。
+/// スコアが目に入るよう少し止める用途。秒数は core が単一ソース（term/web 共有）。
+/// 待機自体はレンダラ側の見た目都合のため、決定論を保つ `tick()` には影響しない。
+pub const AUTO_RESTART_DELAY_SECS: f32 = 1.0;
+
 /// ビルド時の version（= Cargo.toml の version）。term/web の画面描画（#40）で参照する。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -417,6 +422,39 @@ impl Game {
         // new と同じ初期化。reset_play_state は best も rng ストリームも触らないため、
         // best は維持され、棒配置はリスタートのたびに変わる（同一プレイの繰り返しを避ける）。
         self.reset_play_state();
+    }
+
+    /// 決定論 autopilot の 1 ステップ（DESIGN §4）。`--headless` ベンチと `--auto` / `?auto=1` の
+    /// 対話デモを同一 bot で駆動する単一ソース（公開 API のみ使用）。
+    ///
+    /// 前方（`x >= bird_col`）の未 passed で最寄りの棒、無ければ未 passed の最寄りを狙い、
+    /// 鳥が隙間中心（`gap_top + pipe_gap/2`）より下なら [`flap`](Self::flap)。`x` は f32 のため
+    /// `partial_cmp`。Ready なら flap が Playing 化し、GameOver では flap が no-op（呼んでも安全）。
+    pub fn autopilot_step(&mut self) {
+        let bird_col = self.cfg.bird_col;
+        let pipe_gap = self.cfg.pipe_gap;
+
+        // 狙う棒の隙間中心を取り出してから（不変借用を閉じてから）flap する。
+        let gap_center = {
+            let target = self
+                .pipes
+                .iter()
+                .filter(|p| !p.passed && p.x >= bird_col)
+                .min_by(|a, b| a.x.partial_cmp(&b.x).unwrap())
+                .or_else(|| {
+                    self.pipes
+                        .iter()
+                        .filter(|p| !p.passed)
+                        .min_by(|a, b| a.x.partial_cmp(&b.x).unwrap())
+                });
+            target.map(|p| p.gap_top as f32 + pipe_gap as f32 / 2.0)
+        };
+
+        if let Some(center) = gap_center {
+            if (self.bird_cell().1 as f32) > center {
+                self.flap();
+            }
+        }
     }
 }
 
@@ -955,5 +993,58 @@ mod tests {
         let mut a = Accumulator::new();
         let total = a.advance(DT * 1.5) + a.advance(DT * 1.5);
         assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn autopilot_flaps_when_below_gap_center() {
+        // 鳥を狙う棒の隙間中心より十分下に置くと、autopilot_step は flap して
+        // 上向き初速（flap_impulse）を与える。Ready→Playing 化も flap が担う。
+        let mut g = Game::new(Config::default(), 1);
+        g.flap(); // Playing 化
+        let center = g.pipes()[0].gap_top as f32 + g.cfg.pipe_gap as f32 / 2.0;
+        g.bird_y = center + 5.0; // 中心より下
+        g.bird_vy = 3.0; // 落下中
+        g.autopilot_step();
+        assert_eq!(
+            g.bird_vy, g.cfg.flap_impulse,
+            "中心より下なら flap して上向き初速になる"
+        );
+    }
+
+    #[test]
+    fn autopilot_demo_loop_recovers_after_death() {
+        // レンダラの「眺める用ループ」を core で再現し、死亡から確実に復帰することを担保する。
+        // 自然死は seed 依存（bot が長く生き残る seed もある）ため、まず落下で確定的に死なせる。
+        let mut g = Game::new(Config::default(), 1);
+        g.flap(); // Playing 化
+        for _ in 0..600 {
+            g.tick(); // flap せず落下 → 地面で GameOver
+            if g.phase() == Phase::GameOver {
+                break;
+            }
+        }
+        assert_eq!(g.phase(), Phase::GameOver, "落下で GameOver になる");
+
+        // GameOver なら restart、その後は autopilot_step → tick で進む（= auto モードのループ）。
+        g.restart();
+        assert_eq!(g.phase(), Phase::Ready);
+        assert_eq!(g.score(), 0, "restart で score は 0 に戻る");
+
+        let mut reached_playing_after_restart = false;
+        for _ in 0..300 {
+            if g.phase() == Phase::GameOver {
+                g.restart();
+                continue;
+            }
+            g.autopilot_step();
+            g.tick();
+            if g.phase() == Phase::Playing {
+                reached_playing_after_restart = true;
+            }
+        }
+        assert!(
+            reached_playing_after_restart,
+            "restart 後に autopilot が Playing を駆動し、進み続けること"
+        );
     }
 }

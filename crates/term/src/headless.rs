@@ -3,39 +3,9 @@
 
 use flappy_core::{Config, Game};
 
-/// DESIGN §4 の決定論 autopilot 1 フレーム分。
-///
-/// 前方（`x >= bird_col`）の未 passed で最寄りの棒、無ければ未 passed の最寄りを狙い、
-/// 鳥が隙間中心（`gap_top + pipe_gap/2`）より下なら `flap()`。`x` は f32 のため `partial_cmp`。
-pub fn autopilot_step(game: &mut Game) {
-    let bird_col = game.config().bird_col;
-    let pipe_gap = game.config().pipe_gap;
-
-    // 狙う棒の隙間中心を取り出してから（不変借用を閉じてから）flap する。
-    let gap_center = {
-        let pipes = game.pipes();
-        let target = pipes
-            .iter()
-            .filter(|p| !p.passed && p.x >= bird_col)
-            .min_by(|a, b| a.x.partial_cmp(&b.x).unwrap())
-            .or_else(|| {
-                pipes
-                    .iter()
-                    .filter(|p| !p.passed)
-                    .min_by(|a, b| a.x.partial_cmp(&b.x).unwrap())
-            });
-        target.map(|p| p.gap_top as f32 + pipe_gap as f32 / 2.0)
-    };
-
-    if let Some(center) = gap_center {
-        if (game.bird_cell().1 as f32) > center {
-            game.flap();
-        }
-    }
-}
-
 /// `seed` から `frames` フレーム autopilot 実行し最終スコアを返す。
-/// 各フレームは autopilot の判断 → 固定 DT の `tick()`。
+/// 各フレームは autopilot の判断 → 固定 DT の `tick()`。autopilot は core の
+/// [`Game::autopilot_step`] が単一ソース（`--auto` / `?auto=1` の対話デモと同一 bot）。
 /// `speedup` 有効時は core の `Config::with_speedup`（score 依存の速度上昇）を使う。
 pub fn run_headless(seed: u64, frames: u32, speedup: bool) -> u32 {
     let cfg = if speedup {
@@ -45,7 +15,7 @@ pub fn run_headless(seed: u64, frames: u32, speedup: bool) -> u32 {
     };
     let mut game = Game::new(cfg, seed);
     for _ in 0..frames {
-        autopilot_step(&mut game);
+        game.autopilot_step();
         game.tick();
     }
     game.score()

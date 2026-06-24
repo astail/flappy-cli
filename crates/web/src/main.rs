@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use flappy_core::{
     layout, pipe_blocks_row, primary_action, Accumulator, Config, Game, Phase, PrimaryAction,
-    GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT, READY_TITLE, VERSION,
+    AUTO_RESTART_DELAY_SECS, GAMEOVER_RETRY_HINT, GAMEOVER_TITLE, READY_HINT, READY_TITLE, VERSION,
 };
 use gloo_events::{EventListener, EventListenerOptions};
 use wasm_bindgen::prelude::*;
@@ -54,6 +54,18 @@ fn speedup_enabled() -> bool {
         == Some("1")
 }
 
+/// URL クエリ `?auto=1` でオートモード（autopilot による自動デモ）を有効化するか判定する
+/// （起動時に 1 回読む）。term の `--auto` 起動フラグと意味論が対称（web は load 時に URL で決める）。
+/// bot ロジックは core の `Game::autopilot_step` が単一ソース（term/headless と同一）。
+fn auto_enabled() -> bool {
+    let search = window().location().search().unwrap_or_default();
+    web_sys::UrlSearchParams::new_with_str(&search)
+        .ok()
+        .and_then(|p| p.get("auto"))
+        .as_deref()
+        == Some("1")
+}
+
 fn request_animation_frame(f: &RafCallback) {
     window()
         .request_animation_frame(f.as_ref().unchecked_ref())
@@ -72,7 +84,8 @@ fn apply_primary(game: &mut Game) {
 
 /// 1 フレームを canvas に矩形で描画する。term の `scene_to_string` と同じ順序・同じ
 /// 占有述語を使い、両プラットフォームで見た目を揃える。
-fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
+/// `auto`（`?auto=1`）が真なら HUD 中央に `AUTO` バッジを描く（term の overlay_text と同一配置）。
+fn draw(ctx: &CanvasRenderingContext2d, game: &Game, auto: bool) {
     let cfg = game.config();
     let (cols, rows) = (cfg.cols, cfg.rows);
     let cell = CELL as f64;
@@ -133,9 +146,16 @@ fn draw(ctx: &CanvasRenderingContext2d, game: &Game) {
     let _ = ctx.fill_text(&format!("SCORE {}", game.score()), score_x, hud_y);
     ctx.set_text_align("right");
     let _ = ctx.fill_text(&format!("BEST {}", game.best()), w - cell, hud_y);
+    // オートモード時は HUD 中央に AUTO バッジ（term の overlay_text と同じく中央配置）。
+    if auto {
+        ctx.set_text_align("center");
+        let _ = ctx.fill_text("AUTO", w / 2.0, hud_y);
+    }
 
     // version（地面ライン右端に控えめに）。term の scene と同じ右下配置・単一ソース。
+    // align は明示的に right に戻す（auto バッジの center リークを打ち消す。非 auto でも no-op）。
     ctx.set_font("12px monospace");
+    ctx.set_text_align("right");
     let _ = ctx.fill_text(
         &format!("v{VERSION}"),
         w - cell * 0.5,
@@ -215,6 +235,8 @@ fn main() {
     } else {
         Config::default()
     };
+    // ?auto=1 のとき term の --auto と同じく autopilot が自動操作する（bot は core 単一ソース）。
+    let auto = auto_enabled();
     let game = Rc::new(RefCell::new(Game::new(cfg, js_sys::Date::now() as u64)));
     {
         let cfg = game.borrow();
@@ -294,6 +316,8 @@ fn main() {
     // 前フレームからの実時間を蓄積し、固定 DT 刻みで tick（描画頻度非依存＝決定論）。
     let f: Rc<RefCell<Option<RafCallback>>> = Rc::new(RefCell::new(None));
     let g = f.clone();
+    // --auto の GameOver 自動リスタート用。死亡時刻（RAF の ms）を覚え、一定秒後に restart。
+    let gameover_since: Cell<Option<f64>> = Cell::new(None);
     *g.borrow_mut() = Some(Closure::wrap(Box::new(move |time: f64| {
         // 実経過時間を core の Accumulator に渡し、消化すべき tick 数を得る。
         // MAX_FRAME_DT クランプ（spiral of death 防止）と固定ステップ消化は core が単一ソース（#139）。
@@ -306,11 +330,28 @@ fn main() {
         {
             let mut game = game.borrow_mut();
             for _ in 0..ticks {
+                // ?auto=1: 各 tick の直前に autopilot が判断（term/headless と 1:1 で同一挙動）。
+                if auto {
+                    game.autopilot_step();
+                }
                 game.tick();
+            }
+            // ?auto=1: GameOver になったら少し見せてから自動リスタート（待機秒は core 単一ソース）。
+            if auto {
+                if game.phase() == Phase::GameOver {
+                    let since = gameover_since.get().unwrap_or(time);
+                    gameover_since.set(Some(since));
+                    if time - since >= (AUTO_RESTART_DELAY_SECS as f64) * 1000.0 {
+                        game.restart();
+                        gameover_since.set(None);
+                    }
+                } else {
+                    gameover_since.set(None);
+                }
             }
         }
 
-        draw(&ctx, &game.borrow());
+        draw(&ctx, &game.borrow(), auto);
         request_animation_frame(f.borrow().as_ref().unwrap());
     }) as Box<dyn FnMut(f64)>));
     request_animation_frame(g.borrow().as_ref().unwrap());

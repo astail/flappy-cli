@@ -25,7 +25,7 @@ use crossterm::terminal::{
 };
 use crossterm::{cursor, execute, queue};
 
-use flappy_core::{Accumulator, Config, Game};
+use flappy_core::{Accumulator, Config, Game, Phase, AUTO_RESTART_DELAY_SECS};
 
 use layout::Layout;
 
@@ -72,11 +72,12 @@ fn paint_color(paint: scene::Paint) -> Option<Color> {
 fn draw_scene(
     out: &mut impl Write,
     game: &Game,
+    auto: bool,
     course_lines: Option<&[String]>,
     ox: u16,
     oy: u16,
 ) -> io::Result<()> {
-    let frame = scene::render(game, course_lines);
+    let frame = scene::render(game, auto, course_lines);
     for (y, (line, paints)) in frame.chars.iter().zip(frame.paint.iter()).enumerate() {
         queue!(out, cursor::MoveTo(ox, oy + y as u16))?;
         // 現在出力中の色（None = 端末既定色）。行頭は既定色から始める。
@@ -150,6 +151,8 @@ USAGE:
                                              コースにする（例: flappy --cmd \"ls -la\"）
     flappy --speedup                         スコアが上がるほど横スクロールが速くなる
                                              モード（--cmd と併用可。無指定は一定速度）
+    flappy --auto                            自分で操作せず AI が自動で飛び続けるのを眺める
+                                             デモモード（--speedup / --cmd と併用可）
     flappy --headless [--seed S] [--frames N]
                                              決定論 autopilot で N フレーム実行し
                                              最終スコアを stdout に出力（既定 S=1, N=600）
@@ -217,6 +220,10 @@ fn main() -> io::Result<()> {
     // 数値（step/cap）は core の Config::with_speedup が単一ソース。
     let speedup = args.iter().any(|a| a == "--speedup");
 
+    // --auto: 自分で操作せず autopilot が自動で飛び続けるのを眺めるデモモード。
+    // bot は core の Game::autopilot_step が単一ソース（headless と同一）。
+    let auto = args.iter().any(|a| a == "--auto");
+
     // headless モード: TTY 不要・端末ガード非経由で N フレーム自動実行しスコアを stdout 出力。
     if args.iter().any(|a| a == "--headless") {
         let seed = parse_flag_or_exit(&args, "--seed", 1);
@@ -262,6 +269,8 @@ fn main() -> io::Result<()> {
     let mut last_size = size()?;
     let mut last = Instant::now();
     let mut acc = Accumulator::new();
+    // --auto の GameOver 自動リスタート用。死亡時刻を覚え、一定秒後に restart する。
+    let mut gameover_since: Option<Instant> = None;
 
     'game: loop {
         // 入力を非ブロッキングで全て取り出して適用。
@@ -297,9 +306,27 @@ fn main() -> io::Result<()> {
                 let ticks = acc.advance((now - last).as_secs_f32());
                 last = now;
                 for _ in 0..ticks {
+                    // --auto: 各 tick の直前に autopilot が判断（headless と 1:1 で同一挙動）。
+                    if auto {
+                        game.autopilot_step();
+                    }
                     game.tick();
                 }
-                draw_scene(&mut out, &game, course_lines.as_deref(), ox, oy)?;
+                // --auto: GameOver になったら少し見せてから自動リスタート（待機秒は core 単一ソース）。
+                if auto {
+                    if game.phase() == Phase::GameOver {
+                        let since = *gameover_since.get_or_insert(now);
+                        if now.duration_since(since)
+                            >= Duration::from_secs_f32(AUTO_RESTART_DELAY_SECS)
+                        {
+                            game.restart();
+                            gameover_since = None;
+                        }
+                    } else {
+                        gameover_since = None;
+                    }
+                }
+                draw_scene(&mut out, &game, auto, course_lines.as_deref(), ox, oy)?;
             }
         }
 

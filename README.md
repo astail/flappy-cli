@@ -42,6 +42,7 @@
 | （なし） | TUI でプレイ |
 | `--cmd "<command>"` | コマンド出力（stdout）の各行を縦の「文字壁」にしてコースにする（例: `flappy --cmd "ls -la"`）。`--headless` とは併用しない |
 | `--speedup` | スコアが上がるほど横スクロールが速くなる「スピードアップ」モード（`--cmd` と併用可。無指定は一定速度）。ブラウザ版の `?speedup=1` と同じ速度カーブ |
+| `--auto` | 自分で操作せず autopilot が自動で飛び続けるのを眺めるデモモード。死んだら少し止めて自動リスタート（`--speedup` / `--cmd` と併用可）。ブラウザ版の `?auto=1` と同じ |
 | `--headless [--seed S] [--frames N]` | TTY 不要の決定論 autopilot で N フレーム実行し、最終スコアを stdout に出力（既定 `S=1` / `N=600`） |
 | `-h`, `--help` | ヘルプを表示して終了 |
 | `-V`, `--version` | バージョンを表示して終了 |
@@ -94,6 +95,8 @@ tar xzf flappy-${VERSION}-x86_64-unknown-linux-musl.tar.gz
 インストール不要。<https://astail.github.io/flappy-cli/> をブラウザで開く。
 
 URL に `?speedup=1` を付ける（<https://astail.github.io/flappy-cli/?speedup=1>）と、スコアが上がるほど速くなる「スピードアップ」モードで遊べる（ターミナル版の `--speedup` と同じ速度カーブ）。画面左上のチェックボックスでも切り替えられる。
+
+URL に `?auto=1` を付ける（<https://astail.github.io/flappy-cli/?auto=1>）と、autopilot が自動で飛び続けるのを眺めるデモモードになる（ターミナル版の `--auto` と同じ）。死んだら少し止めて自動リスタートする。画面左上のチェックボックスでも切り替えられ、`?speedup=1` と併用できる。
 
 ## 動かし方（ソースからビルド）
 

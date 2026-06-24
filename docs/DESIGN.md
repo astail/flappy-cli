@@ -265,7 +265,7 @@ pub struct Game {
 - 各フレーム: 経過実時間を蓄積し固定 `DT` 刻みで `tick()` を呼ぶ → グリッド（`Vec<char>` か `String`）を組み立て、カーソルを左上に戻して一括描画。
   - 棒は Braille サブセル描画（1 セル = 横2×縦4 ドット、緑）。鳥は `●` の 1 文字（bird_cell() の round 行・死亡時のみ `✕`・赤）。加えて地面ライン、上部にスコア/ベスト、Ready/GameOver のメッセージ。
 - グリッドはターミナル幅未満ならセンタリング（レターボックス）。64×24 未満ならプレイを止めてリサイズを促す（§2）。`Event::Resize` は次フレームで再センタリングのみ。
-- **headless モード** `flappy --headless --seed S --frames N`: TTY 不要・端末ガード非経由で、**決定論的な autopilot**（下記の一意規則で隙間を追従）＋**固定 DT** で N フレーム自動実行し最終スコアを stdout 出力。CI は **(a) 同一 seed の 2 回走でスコア一致**（決定論の回帰検出）と **(b) スコアが既知のゴールデン値（非ゼロ）** を assert する（ゴールデン値は実装後に実測して埋める）。autopilot 規則は実装非依存に一意化する:
+- **headless モード** `flappy --headless --seed S --frames N`: TTY 不要・端末ガード非経由で、**決定論的な autopilot**（下記の一意規則で隙間を追従。core の `Game::autopilot_step` が単一ソースで、`--auto` / `?auto=1` の対話デモも同じ bot で駆動する）＋**固定 DT** で N フレーム自動実行し最終スコアを stdout 出力。CI は **(a) 同一 seed の 2 回走でスコア一致**（決定論の回帰検出）と **(b) スコアが既知のゴールデン値（非ゼロ）** を assert する（ゴールデン値は実装後に実測して埋める）。autopilot 規則は実装非依存に一意化する:
 
   ```
   // 前方(x≥bird_col)の未passed の最寄り、無ければ未passed の最寄りを狙う（x は f32 なので partial_cmp）
@@ -279,6 +279,7 @@ pub struct Game {
 - bin 名は `flappy`（`cargo run -p flappy-term` / インストール後 `flappy`）。
 - **`--help` / `--version`**: `flappy --help`（`-h`）は usage を stdout に表示して即終了、`flappy --version`（`-V`）は `flappy {flappy_core::VERSION}` を表示して即終了。いずれも alternate screen に入らない（CLI の慣習）。`--headless` の `--seed`/`--frames` は値の欠落・不正を silent fallback せず非ゼロ終了（exit 2）。
 - **`--speedup` モード（速度漸増）** `flappy --speedup`: score が上がるほど横スクロール速度が `scroll_speed_step` ずつ上がり `scroll_speed_max` でクランプする（実効速度は core の `current_scroll_speed`＝`(scroll_speed + step*score).min(cap)`）。有効化は起動フラグの検出のみで、速度上昇ロジック・数値（step/cap）は core の `Config::with_speedup` が単一ソース（web の `?speedup=1` と完全に同じカーブ。§5/§7）。`--cmd` と併用可（文字壁コースに速度上昇が乗る）。無指定は従来どおり一定速度（既定 Config は step=0・cap=scroll_speed で実効速度不変＝後方互換）。
+- **`--auto` モード（自動デモ / attract）** `flappy --auto`: 自分で操作せず autopilot が自動で飛び続けるのを眺めるモード。ゲームループ内で **各 tick の直前に `Game::autopilot_step()` を呼ぶ**（headless と 1:1 で同一挙動＝同じ bot）。GameOver になったら `AUTO_RESTART_DELAY_SECS`（= 1.0 秒。core が単一ソース）だけ見せてから自動 `restart()` し、Ready→Playing→GameOver を延々と繰り返す。**待機（pause）はレンダラ側の見た目都合**で、決定論を保つ core の `tick()` には持たせない（pause を持つと環境の時間源差で挙動が割れるため）。HUD 中央に `AUTO` バッジを重ねる（web と同一配置。canvas 内の見た目変更なので term/web を揃える）。`q`/Esc の終了は auto 中も生きる。`--speedup` / `--cmd` と併用可。
 - **`--cmd "<command>"` モード（文字壁コース・term 限定）** `flappy --cmd "ls -la"`: 指定コマンドを `sh -c` で実行し、stdout の各行（空行は除外）を 1 本の棒に対応させる。隙間の縦位置 `gap_top` は各行内容の FNV-1a ハッシュから `[1, rows-1-pipe_gap]` に写像（同じ出力 → 同じコース・行ごとにバラつく。`ls -la` は行幅が均一で「行長」だと平坦になるためハッシュを採用。**写像を行長に変えたい場合は `course::gap_top_for` 1 つの差し替えで済む**）。棒は緑の Braille でなく**その行の文字を縦に敷き詰めた「文字壁」**で描き（行が棒より短ければ繰り返す）、隙間（穴）を抜ける。行を使い切ったら先頭からループ（エンドレス維持）。コマンド実行は alternate screen 入場“前”に行い、実行失敗・使える行が 0 なら exit 2。`--headless` とは併用しない。
   - **物理・衝突・スコアは通常モードと同一**（core は `gap_top` 列を受け取るだけ＝`Game::with_course`。衝突は従来どおり `pipe_blocks_row`、文字壁は見た目だけ）。横位置は衝突と同じ `round(p.x)` の 1 セル（Braille の 1/2 セル平滑は course 時のみ無し）。
   - **term 限定の意図的許容差**: web はシェルコマンドを実行できないため本モードは持たない（course を渡さない通常時は term/web とも従来どおり Braille 棒で完全一致）。「ターミナルで実行する方」に閉じた機能として許容する。文字壁は ASCII 出力を想定（全角は 1 セルに 1 文字を置く都合でずれて見えうる）。
@@ -292,6 +293,7 @@ pub struct Game {
 - RAF ループ: 前フレームからの実時間を蓄積し**固定 `DT` 刻みで `tick()`**（§1。1フレーム上限 0.10s）。RAF ハンドルは **drop で停止**するので構造体に保持するか `forget()` する（gloo-events のリスナ保持と同じ作法）。**`visibilitychange` で非表示中はループを止め、復帰時に `acc=0` にリセット（必須）**——長時間バックグラウンド後の復帰一発死を防ぐ（0.10s クランプは描画ヒッチ用の二次的な安全網）。描画は core の状態を canvas に矩形で。1セル=固定 px（例 16px）、canvas = `64*16 × 24*16`、CSS で中央寄せ。**高 DPI** は `image-rendering: pixelated` ＋整数座標描画で滲み回避（`devicePixelRatio` スケールは任意）。色は term と揃える（恐竜風の淡背景＋濃色要素、棒は緑）。
 - 描画ロジックは term と同じ「core グリッドをなぞって塗る」構造（言語も手順も共通）。
 - **`?speedup=1` モード（速度漸増）**: 起動時に `window.location.search` を 1 回読み、`?speedup=1` なら term の `--speedup` と同じ `Config::with_speedup`（数値は core 由来＝drift なし）で Game を構築する。term が「起動フラグで決める」のと対称に web は「load 時に URL で決める」（seed 源が clock / `Date.now()` で違うのと同じ扱い）。canvas（ゲーム画面）の見た目は一切変わらない＝「term/web で画面を揃える」原則に抵触しない（変わるのは index.html という web 固有のページ chrome のみ）。共有可能（`…/flappy-cli/?speedup=1` を渡すだけで turbo を試せる）。index.html に小さなチェックボックスを置き、`?speedup=1` を付けて読み直す導線を用意する（URL 手打ち不要・canvas 外なので画面パリティに影響しない）。
+- **`?auto=1` モード（自動デモ）**: term の `--auto` と対称。起動時に `window.location.search` を 1 回読み、`?auto=1` なら RAF ループで **各 tick の直前に `Game::autopilot_step()` を呼び**（headless / term と同一 bot）、GameOver になったら `AUTO_RESTART_DELAY_SECS`（core 単一ソース）だけ見せてから自動 `restart()` する。GameOver からの経過は RAF の `time`（ms）で測る（term が `Instant` で測るのと対称・core は pause を持たない）。HUD 中央に `AUTO` バッジを描く（term の overlay_text と同一配置＝画面パリティ維持）。index.html に「オート」チェックボックスを置き `?speedup=1` と併用できる導線を用意する。
 
 ---
 

@@ -32,10 +32,10 @@
         max-height: 100vh;
         max-height: 100dvh;
       }
-      /* スピードアップ切替（?speedup=1 を付けて読み直すだけ。canvas 外なので画面パリティ不変）。 */
-      #speedup-toggle {
+      /* 設定トグル（?speedup=1 / ?auto=1 を付けて読み直すだけ。canvas 外なので画面パリティ不変）。 */
+      #speedup-toggle,
+      #auto-toggle {
         position: fixed;
-        top: 8px;
         left: 8px;
         font: 14px monospace;
         color: #333;
@@ -44,6 +44,12 @@
         border-radius: 6px;
         user-select: none;
       }
+      #speedup-toggle {
+        top: 8px;
+      }
+      #auto-toggle {
+        top: 40px;
+      }
     </style>
   </head>
   <body>
@@ -51,23 +57,33 @@
     <label id="speedup-toggle">
       <input type="checkbox" id="speedup" /> スピードアップ
     </label>
-    <!-- URL クエリ ?speedup=1 をチェックボックスで切り替えるだけの導線（手打ち不要）。
+    <label id="auto-toggle">
+      <input type="checkbox" id="auto" /> オート
+    </label>
+    <!-- URL クエリ ?speedup=1 / ?auto=1 をチェックボックスで切り替えるだけの導線（手打ち不要）。
          実際のモード判定は wasm 側が起動時に window.location.search を読む（単一ソース）。 -->
     <script>
       (function () {
-        var params = new URLSearchParams(location.search);
-        var toggle = document.getElementById("speedup-toggle");
-        var box = document.getElementById("speedup");
-        box.checked = params.get("speedup") === "1";
-        // 設定トグルのクリックを window の主操作 click リスナ（flap/restart）へ伝播させない。
-        toggle.addEventListener("click", function (e) {
-          e.stopPropagation();
-        });
-        box.addEventListener("change", function () {
-          if (box.checked) params.set("speedup", "1");
-          else params.delete("speedup");
-          location.search = params.toString();
-        });
+        // 同じ仕組みでクエリ key とトグル/チェックボックスを結びつける（speedup / auto 共通）。
+        function bindToggle(key, toggleId, boxId) {
+          var params = new URLSearchParams(location.search);
+          var toggle = document.getElementById(toggleId);
+          var box = document.getElementById(boxId);
+          box.checked = params.get(key) === "1";
+          // 設定トグルのクリックを window の主操作 click リスナ（flap/restart）へ伝播させない。
+          toggle.addEventListener("click", function (e) {
+            e.stopPropagation();
+          });
+          box.addEventListener("change", function () {
+            // 変更直前の URL を読み直し、もう一方のトグル状態を踏み潰さない。
+            var p = new URLSearchParams(location.search);
+            if (box.checked) p.set(key, "1");
+            else p.delete(key);
+            location.search = p.toString();
+          });
+        }
+        bindToggle("speedup", "speedup-toggle", "speedup");
+        bindToggle("auto", "auto-toggle", "auto");
       })();
     </script>
   </body>
