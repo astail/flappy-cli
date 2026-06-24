@@ -94,7 +94,8 @@ fn place_at(chars: &mut [char], paint: &mut [Paint], text: &str, start: usize) {
 /// `course_lines` が `None`（通常）なら棒を Braille サブセルで描く。`Some(lines)`（term の
 /// `--cmd` モード）なら棒を「その行の文字を縦に敷き詰めた文字壁」で描く（`lines[course_idx]`）。
 /// 鳥・HUD・天井/地面ライン・メッセージは [`overlay_text`] で両モード共通に上書きする。
-pub fn render(game: &Game, course_lines: Option<&[String]>) -> Frame {
+/// `auto`（`--auto`）が真なら HUD 中央に `AUTO` バッジを重ねる（web と同一配置）。
+pub fn render(game: &Game, auto: bool, course_lines: Option<&[String]>) -> Frame {
     let cfg = game.config();
     let (cols, rows) = (cfg.cols as usize, cfg.rows as usize);
 
@@ -108,7 +109,7 @@ pub fn render(game: &Game, course_lines: Option<&[String]>) -> Frame {
 
     // 鳥は Braille ブロブではなく ● の 1 文字で描く（overlay_text 参照。web の塗り円と
     // 見た目を揃える。GameOver の ✕ も同様に文字で描く）。テキストレイヤーで上書き。
-    overlay_text(game, &mut chars, &mut paint, cfg.cols, cfg.rows);
+    overlay_text(game, auto, &mut chars, &mut paint, cfg.cols, cfg.rows);
 
     Frame { chars, paint }
 }
@@ -215,6 +216,7 @@ fn render_pipes_text(
 /// テキストレイヤー（天井・地面ライン / HUD / メッセージ / GameOver ボックス / 死亡鳥）を上書きする。
 fn overlay_text(
     game: &Game,
+    auto: bool,
     chars: &mut [Vec<char>],
     paint: &mut [Vec<Paint>],
     cols: u16,
@@ -238,6 +240,12 @@ fn overlay_text(
     let best_text = format!("BEST {}", game.best());
     let best_start = cols_u.saturating_sub(best_text.chars().count() + 1);
     place_at(&mut chars[hud], &mut paint[hud], &best_text, best_start);
+
+    // オートモード時は HUD 中央に AUTO バッジ（SCORE=左 / BEST=右で中央は空く）。
+    // web の draw も同じく HUD 行中央へ "AUTO" を描き、term/web で見た目を揃える。
+    if auto {
+        place_centered(&mut chars[hud], &mut paint[hud], "AUTO", cols);
+    }
 
     // 地面ライン（最下行）。右端に version を控えめに重ねる（単一ソース = core）。
     let last = rows as usize - 1;
@@ -290,7 +298,7 @@ fn overlay_text(
 /// 既知状態の core を 1 フレームの文字グリッドへ変換する（プレーンテキスト、テスト/ゴールデン用）。
 #[cfg(test)]
 pub fn scene_to_string(game: &Game) -> String {
-    render(game, None).to_text()
+    render(game, false, None).to_text()
 }
 
 /// GameOver の罫線ボックスを中央へ描く（内側幅 = 最長行の retry 案内に合わせる）。
@@ -399,6 +407,21 @@ mod tests {
     }
 
     #[test]
+    fn auto_badge_only_when_enabled() {
+        let g = Game::new(Config::default(), 1);
+        // 通常（auto=false）は AUTO を出さない＝既存ゴールデンと同一。
+        assert!(!scene_to_string(&g).contains("AUTO"));
+        // auto=true は HUD 行（row 0）中央に AUTO バッジ（SCORE/BEST と共存）。
+        let scene = render(&g, true, None).to_text();
+        let ls = lines(&scene);
+        assert!(
+            ls[0].contains("AUTO"),
+            "auto モードは HUD に AUTO バッジを出す"
+        );
+        assert!(ls[0].contains("SCORE 0") && ls[0].contains("BEST 0"));
+    }
+
+    #[test]
     fn version_is_drawn_from_core_const() {
         let g = Game::new(Config::default(), 1);
         let scene = scene_to_string(&g);
@@ -434,7 +457,7 @@ mod tests {
             }
             g.tick();
             // 棒セル（paint==Pipe）が存在すれば成功。
-            let frame = render(&g, None);
+            let frame = render(&g, false, None);
             if frame.paint.iter().flatten().any(|p| *p == Paint::Pipe) {
                 found = true;
                 break;
@@ -483,7 +506,7 @@ mod tests {
             }
         }
         assert_eq!(g.phase(), Phase::GameOver);
-        let frame = render(&g, None);
+        let frame = render(&g, false, None);
         assert!(
             frame.paint.iter().flatten().any(|p| *p == Paint::BirdDead),
             "dead bird cell should be tagged Paint::BirdDead"
@@ -509,7 +532,7 @@ mod tests {
             0,
             "ceiling death clamps bird_cell row to 0"
         );
-        let frame = render(&g, None);
+        let frame = render(&g, false, None);
         assert!(
             !frame.chars[0].contains(&BIRD_DEAD),
             "death marker must not land on row 0 (ceiling line / HUD)"
@@ -540,7 +563,7 @@ mod tests {
             if g.phase() != Phase::Playing {
                 break;
             }
-            let frame = render(&g, None);
+            let frame = render(&g, false, None);
             let row = g.bird_cell().1.max(1) as usize;
             assert_eq!(
                 frame.chars[row][12], BIRD,
@@ -578,7 +601,7 @@ mod tests {
         let gap_top = p.gap_top;
         assert_ne!(col, 12, "test assumes pipe column differs from bird column");
 
-        let frame = render(&g, Some(&lines));
+        let frame = render(&g, false, Some(&lines));
         let glyphs: Vec<char> = "abcdef".chars().collect();
         for row in 1..(cfg.rows as i32 - 1) {
             let cell = frame.chars[row as usize][col];
@@ -649,7 +672,7 @@ mod tests {
         assert_ne!(c0, c1, "the two pipes must occupy different columns");
 
         // row 1 は gap_top(9/10) の上＝必ず塞ぐ行。各棒が対応する行の先頭文字を描く。
-        let frame = render(&g, Some(&lines));
+        let frame = render(&g, false, Some(&lines));
         assert_eq!(frame.chars[1][c0], 'A', "lines[0] pipe must render 'A'");
         assert_eq!(frame.chars[1][c1], 'B', "lines[1] pipe must render 'B'");
     }
@@ -677,7 +700,7 @@ mod tests {
         let col = p.x.round() as usize;
         let gap_top = p.gap_top;
 
-        let frame = render(&g, Some(&lines));
+        let frame = render(&g, false, Some(&lines));
         let glyphs: Vec<char> = "a b".chars().collect();
         let mut saw_square = false;
         for row in 1..(cfg.rows as i32 - 1) {
