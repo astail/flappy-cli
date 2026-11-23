@@ -100,7 +100,7 @@ URL に `?auto=1` を付ける（<https://astail.github.io/flappy-cli/?auto=1>�
 
 ## 動かし方（ソースからビルド）
 
-事前に Rust ツールチェインが必要（`rust-toolchain.toml` で channel `1.95.0` と `wasm32-unknown-unknown` ターゲットを固定済み）。
+事前に Rust ツールチェインが必要（`rust-toolchain.toml` で channel `1.100.0` と `wasm32-unknown-unknown` ターゲットを固定済み）。
 
 ### ターミナルで遊ぶ
 
